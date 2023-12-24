@@ -1,12 +1,33 @@
+use std::f32::consts::PI;
+
 use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
-use std::f32::consts::PI;
+use bevy_rapier2d::prelude::*;
+
+#[derive(Bundle)]
+struct ControlledBundle {
+    rigid_body: RigidBody,
+    mass: AdditionalMassProperties,
+    thrust: ExternalImpulse,
+}
+
+impl Default for ControlledBundle {
+    fn default() -> Self {
+        Self {
+            rigid_body: RigidBody::Dynamic,
+            mass: AdditionalMassProperties::Mass(1.0),
+            thrust: ExternalImpulse::default(),
+        }
+    }
+}
 
 #[derive(Bundle, LdtkEntity)]
 struct PlayerBundle {
+    #[from_entity_instance]
     instance: EntityInstance,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
+    controlled_bundle: ControlledBundle,
 }
 
 fn main() {
@@ -22,6 +43,8 @@ fn main() {
                     ..default()
                 }),
             LdtkPlugin,
+            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
+            RapierDebugRenderPlugin::default(),
         ))
         .add_systems(Startup, startup)
         .add_systems(Update, move_player)
@@ -30,7 +53,13 @@ fn main() {
         .run();
 }
 
-fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
+fn startup(
+    mut commands: Commands,
+    asset_server: Res<AssetServer>,
+    mut rapier: ResMut<RapierConfiguration>,
+) {
+    rapier.gravity = Vec2::ZERO;
+
     let bounds = Vec3::new(4096.0, 2304.0, 0.0);
     let origin = bounds / 2.0;
 
@@ -49,24 +78,35 @@ fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ldtk_handle: asset_server.load("levels.ldtk"),
         ..default()
     });
+
+    commands.spawn(RigidBody::Dynamic);
 }
 
 fn move_player(
-    mut player: Query<(&EntityInstance, &mut Transform)>,
+    mut player: Query<(&EntityInstance, &mut Transform, &mut ExternalImpulse)>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
 ) {
-    let mut arc = 0f32;
+    let mut accel = Vec2::ZERO;
 
     if input.pressed(KeyCode::Right) {
-        arc -= 2.0 * PI * time.delta_seconds();
+        accel.x += 500.0 * time.delta_seconds();
     }
 
     if input.pressed(KeyCode::Left) {
-        arc += 2.0 * PI * time.delta_seconds();
+        accel.x -= 500.0 * time.delta_seconds();
     }
 
-    for (_, mut transform) in player.iter_mut() {
-        transform.rotate(Quat::from_rotation_z(arc));
+    if input.pressed(KeyCode::Up) {
+        accel.y += 500.0 * time.delta_seconds();
+    }
+
+    if input.pressed(KeyCode::Down) {
+        accel.y -= 500.0 * time.delta_seconds();
+    }
+
+    for (_, mut transform, mut thrust) in player.iter_mut() {
+        transform.rotation = Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), accel.normalize());
+        thrust.impulse = accel;
     }
 }
