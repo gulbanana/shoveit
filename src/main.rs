@@ -51,9 +51,22 @@ fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
     });
 }
 
-fn move_player(mut entities: Query<(&EntityInstance, &mut Transform)>, time: Res<Time>) {
-    let arc = PI * -2.0 * time.delta_seconds();
-    for (_, mut transform) in entities.iter_mut() {
+fn move_player(
+    mut player: Query<(&EntityInstance, &mut Transform)>,
+    time: Res<Time>,
+    input: Res<Input<KeyCode>>,
+) {
+    let mut arc = 0f32;
+
+    if input.pressed(KeyCode::Right) {
+        arc -= 2.0 * PI * time.delta_seconds();
+    }
+
+    if input.pressed(KeyCode::Left) {
+        arc += 2.0 * PI * time.delta_seconds();
+    }
+
+    for (_, mut transform) in player.iter_mut() {
         transform.rotate(Quat::from_rotation_z(arc));
     }
 }
