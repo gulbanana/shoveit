@@ -1,5 +1,3 @@
-use std::f32::consts::PI;
-
 use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -8,6 +6,7 @@ use bevy_rapier2d::prelude::*;
 struct ControlledBundle {
     rigid_body: RigidBody,
     mass: AdditionalMassProperties,
+    velocity: Velocity,
     thrust: ExternalImpulse,
 }
 
@@ -16,6 +15,7 @@ impl Default for ControlledBundle {
         Self {
             rigid_body: RigidBody::Dynamic,
             mass: AdditionalMassProperties::Mass(1.0),
+            velocity: Velocity::default(),
             thrust: ExternalImpulse::default(),
         }
     }
@@ -47,7 +47,7 @@ fn main() {
             RapierDebugRenderPlugin::default(),
         ))
         .add_systems(Startup, startup)
-        .add_systems(Update, move_player)
+        .add_systems(Update, (move_player, orient_player))
         .insert_resource(LevelSelection::Index(0))
         .register_ldtk_entity::<PlayerBundle>("Player")
         .run();
@@ -83,7 +83,7 @@ fn startup(
 }
 
 fn move_player(
-    mut player: Query<(&EntityInstance, &mut Transform, &mut ExternalImpulse)>,
+    mut query: Query<&mut ExternalImpulse, With<EntityInstance>>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
 ) {
@@ -105,8 +105,14 @@ fn move_player(
         accel.y -= 500.0 * time.delta_seconds();
     }
 
-    for (_, mut transform, mut thrust) in player.iter_mut() {
-        transform.rotation = Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), accel.normalize());
+    for mut thrust in query.iter_mut() {
         thrust.impulse = accel;
+    }
+}
+
+fn orient_player(mut query: Query<(&Velocity, &mut Transform), With<EntityInstance>>) {
+    for (velocity, mut transform) in query.iter_mut() {
+        transform.rotation =
+            Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), velocity.linvel.normalize());
     }
 }
