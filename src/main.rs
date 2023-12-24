@@ -47,7 +47,7 @@ fn main() {
             RapierDebugRenderPlugin::default(),
         ))
         .add_systems(Startup, startup)
-        .add_systems(Update, (move_player, orient_player))
+        .add_systems(Update, (move_player, orient_player, cap_velocity))
         .insert_resource(LevelSelection::Index(0))
         .register_ldtk_entity::<PlayerBundle>("Player")
         .run();
@@ -114,5 +114,11 @@ fn orient_player(mut query: Query<(&Velocity, &mut Transform), With<EntityInstan
     for (velocity, mut transform) in query.iter_mut() {
         transform.rotation =
             Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), velocity.linvel.normalize());
+    }
+}
+
+fn cap_velocity(mut query: Query<&mut Velocity, With<EntityInstance>>) {
+    for mut velocity in query.iter_mut() {
+        velocity.linvel = velocity.linvel.clamp_length_max(1250.0);
     }
 }
