@@ -2,32 +2,34 @@ use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 
+#[derive(Default, Component)]
+struct WallTile;
+
+#[derive(Bundle, LdtkIntCell)]
+struct TileBundle {
+    marker: WallTile,
+}
+
+#[derive(Default, Component)]
+struct Player;
+
 #[derive(Bundle)]
 struct ControlledBundle {
     rigid_body: RigidBody,
-    mass: AdditionalMassProperties,
     velocity: Velocity,
     thrust: ExternalImpulse,
-}
-
-impl Default for ControlledBundle {
-    fn default() -> Self {
-        Self {
-            rigid_body: RigidBody::Dynamic,
-            mass: AdditionalMassProperties::Mass(1.0),
-            velocity: Velocity::default(),
-            thrust: ExternalImpulse::default(),
-        }
-    }
+    collider: Collider,
+    mass: ColliderMassProperties,
+    restitution: Restitution,
 }
 
 #[derive(Bundle, LdtkEntity)]
 struct PlayerBundle {
+    player: Player,
     #[from_entity_instance]
     instance: EntityInstance,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
-    controlled_bundle: ControlledBundle,
 }
 
 fn main() {
@@ -44,16 +46,26 @@ fn main() {
                 }),
             LdtkPlugin,
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
-            RapierDebugRenderPlugin::default(),
+            //RapierDebugRenderPlugin::default(),
         ))
-        .add_systems(Startup, startup)
-        .add_systems(Update, (move_player, orient_player, cap_velocity))
+        .add_systems(Startup, setup_game)
+        .add_systems(
+            Update,
+            (
+                setup_level,
+                setup_player,
+                move_player,
+                orient_player,
+                cap_velocity,
+            ),
+        )
         .insert_resource(LevelSelection::Index(0))
-        .register_ldtk_entity::<PlayerBundle>("Player")
+        .register_ldtk_entity::<PlayerBundle>("player")
+        .register_ldtk_int_cell::<TileBundle>(1)
         .run();
 }
 
-fn startup(
+fn setup_game(
     mut commands: Commands,
     asset_server: Res<AssetServer>,
     mut rapier: ResMut<RapierConfiguration>,
@@ -82,8 +94,31 @@ fn startup(
     commands.spawn(RigidBody::Dynamic);
 }
 
+fn setup_level(mut commands: Commands, mut query: Query<Entity, Added<WallTile>>) {
+    for id in query.iter_mut() {
+        commands
+            .entity(id)
+            .insert(Collider::cuboid(128.0, 128.0))
+            .insert(Restitution::coefficient(1.0));
+    }
+}
+
+fn setup_player(mut commands: Commands, mut query: Query<Entity, Added<Player>>) {
+    for id in query.iter_mut() {
+        commands
+            .entity(id)
+            .insert(RigidBody::Dynamic)
+            .insert(Collider::ball(100.0))
+            .insert(ColliderMassProperties::Mass(1.0))
+            .insert(Restitution::coefficient(1.0))
+            .insert(Velocity::default())
+            .insert(ExternalImpulse::default())
+            .insert(LockedAxes::ROTATION_LOCKED);
+    }
+}
+
 fn move_player(
-    mut query: Query<&mut ExternalImpulse, With<EntityInstance>>,
+    mut query: Query<&mut ExternalImpulse, With<Player>>,
     time: Res<Time>,
     input: Res<Input<KeyCode>>,
 ) {
@@ -110,15 +145,17 @@ fn move_player(
     }
 }
 
-fn orient_player(mut query: Query<(&Velocity, &mut Transform), With<EntityInstance>>) {
+fn orient_player(mut query: Query<(&Velocity, &mut Transform), With<Player>>) {
     for (velocity, mut transform) in query.iter_mut() {
-        transform.rotation =
-            Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), velocity.linvel.normalize());
+        if velocity.linvel.length() > 0.0 {
+            transform.rotation =
+                Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), velocity.linvel.normalize());
+        }
     }
 }
 
-fn cap_velocity(mut query: Query<&mut Velocity, With<EntityInstance>>) {
+fn cap_velocity(mut query: Query<&mut Velocity, With<Player>>) {
     for mut velocity in query.iter_mut() {
-        velocity.linvel = velocity.linvel.clamp_length_max(1250.0);
+        velocity.linvel = velocity.linvel.clamp_length_max(2500.0);
     }
 }

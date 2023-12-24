@@ -12,7 +12,7 @@
 	"jsonVersion": "1.4.1",
 	"appBuildId": 471015,
 	"nextUid": 753,
-	"identifierStyle": "Capitalize",
+	"identifierStyle": "Lowercase",
 	"toc": [],
 	"worldLayout": "Free",
 	"worldGridWidth": 256,
@@ -43,7 +43,7 @@
 	"defs": { "layers": [
 		{
 			"__type": "Entities",
-			"identifier": "Entities",
+			"identifier": "entities",
 			"type": "Entities",
 			"uid": 752,
 			"doc": null,
@@ -74,7 +74,7 @@
 		},
 		{
 			"__type": "IntGrid",
-			"identifier": "IntGrid",
+			"identifier": "intgrid",
 			"type": "IntGrid",
 			"uid": 632,
 			"doc": null,
@@ -95,7 +95,7 @@
 			"parallaxScaling": true,
 			"requiredTags": [],
 			"excludedTags": [],
-			"intGridValues": [{ "value": 1, "identifier": null, "color": "#000000", "tile": null, "groupUid": 0 }],
+			"intGridValues": [{ "value": 1, "identifier": "wall", "color": "#000000", "tile": null, "groupUid": 0 }],
 			"intGridValuesGroups": [],
 			"autoRuleGroups": [{ "uid": 635, "name": "Straight Walls", "color": null, "icon": null, "active": true, "isOptional": false, "rules": [
 				{
@@ -1563,7 +1563,7 @@
 		}
 	], "entities": [
 		{
-			"identifier": "Player",
+			"identifier": "player",
 			"uid": 3,
 			"tags": [],
 			"exportToToc": false,
@@ -1600,7 +1600,7 @@
 		{
 			"__cWid": 16,
 			"__cHei": 16,
-			"identifier": "Walls_Forest",
+			"identifier": "walls_forest",
 			"uid": 633,
 			"relPath": "tileset-walls-forest.png",
 			"embedAtlas": null,
@@ -1622,7 +1622,7 @@
 		{
 			"__cWid": 8,
 			"__cHei": 1,
-			"identifier": "Entities",
+			"identifier": "entities",
 			"uid": 751,
 			"relPath": "tileset-entities.png",
 			"embedAtlas": null,
@@ -1641,7 +1641,7 @@
 	], "enums": [], "externalEnums": [], "levelFields": [] },
 	"levels": [
 		{
-			"identifier": "Level_0",
+			"identifier": "level_0",
 			"iid": "5d1b9ff0-8990-11ee-87ff-9146de9620de",
 			"uid": 631,
 			"worldX": 0,
@@ -1662,7 +1662,7 @@
 			"fieldInstances": [],
 			"layerInstances": [
 				{
-					"__identifier": "Entities",
+					"__identifier": "entities",
 					"__type": "Entities",
 					"__cWid": 16,
 					"__cHei": 9,
@@ -1686,7 +1686,7 @@
 					"gridTiles": [],
 					"entityInstances": [
 						{
-							"__identifier": "Player",
+							"__identifier": "player",
 							"__grid": [5,4],
 							"__pivot": [0.5,0.5],
 							"__tags": [],
@@ -1704,7 +1704,7 @@
 					]
 				},
 				{
-					"__identifier": "IntGrid",
+					"__identifier": "intgrid",
 					"__type": "IntGrid",
 					"__cWid": 16,
 					"__cHei": 9,
