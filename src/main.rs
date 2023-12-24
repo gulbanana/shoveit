@@ -1,6 +1,12 @@
 use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 
+#[derive(Bundle, LdtkEntity)]
+struct PlayerBundle {
+    #[sprite_sheet_bundle]
+    sprite_bundle: SpriteSheetBundle,
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -17,6 +23,7 @@ fn main() {
         ))
         .add_systems(Startup, startup)
         .insert_resource(LevelSelection::Index(0))
+        .register_ldtk_entity::<PlayerBundle>("Player")
         .run();
 }
 
@@ -27,7 +34,9 @@ fn startup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(Camera2dBundle {
         transform: Transform::from_translation(origin),
         projection: OrthographicProjection {
-            scaling_mode: ScalingMode::FixedHorizontal(bounds.x),
+            far: 1000.0,
+            near: -1000.0,
+            scaling_mode: ScalingMode::FixedHorizontal(4096.0),
             ..default()
         },
         ..default()
