@@ -50,7 +50,7 @@ fn main() {
                 }),
             LdtkPlugin,
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
-            RapierDebugRenderPlugin::default(),
+            //RapierDebugRenderPlugin::default(),
         ))
         .add_systems(Startup, setup_game)
         .add_systems(
@@ -71,7 +71,8 @@ fn setup_game(
     rapier.gravity = Vec2::ZERO;
 
     let bounds = Vec3::new(4096.0, 2304.0, 0.0);
-    let origin = bounds / 2.0;
+    let offset = Vec3::new(512.0, 512.0, 0.0); // 2-tile border for ratio safety
+    let origin = bounds / 2.0 + offset;
 
     commands.spawn(Camera2dBundle {
         transform: Transform::from_translation(origin),
