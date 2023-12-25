@@ -1,4 +1,8 @@
-use bevy::{prelude::*, render::camera::ScalingMode};
+use std::f32::consts::PI;
+
+use bevy::math::Vec3Swizzles;
+use bevy::prelude::*;
+use bevy::render::camera::ScalingMode;
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 
@@ -46,18 +50,12 @@ fn main() {
                 }),
             LdtkPlugin,
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
-            //RapierDebugRenderPlugin::default(),
+            RapierDebugRenderPlugin::default(),
         ))
         .add_systems(Startup, setup_game)
         .add_systems(
             Update,
-            (
-                setup_level,
-                setup_player,
-                move_player,
-                orient_player,
-                cap_velocity,
-            ),
+            (setup_level, setup_player, move_player, cap_player_velocity),
         )
         .insert_resource(LevelSelection::Index(0))
         .register_ldtk_entity::<PlayerBundle>("player")
@@ -108,54 +106,73 @@ fn setup_player(mut commands: Commands, mut query: Query<Entity, Added<Player>>)
         commands
             .entity(id)
             .insert(RigidBody::Dynamic)
-            .insert(Collider::ball(100.0))
-            .insert(ColliderMassProperties::Mass(1.0))
-            .insert(Restitution::coefficient(1.0))
             .insert(Velocity::default())
             .insert(ExternalImpulse::default())
-            .insert(LockedAxes::ROTATION_LOCKED);
+            .insert(Collider::ball(100.0))
+            .insert(ColliderMassProperties::Mass(1.0))
+            .insert(Restitution::coefficient(1.0));
     }
 }
 
 fn move_player(
-    mut query: Query<&mut ExternalImpulse, With<Player>>,
     time: Res<Time>,
+    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<Player>>,
     input: Res<Input<KeyCode>>,
 ) {
-    let mut accel = Vec2::ZERO;
+    let mut thrust = Vec2::ZERO;
 
     if input.pressed(KeyCode::Right) {
-        accel.x += 500.0 * time.delta_seconds();
+        thrust.x += 1.0;
     }
 
     if input.pressed(KeyCode::Left) {
-        accel.x -= 500.0 * time.delta_seconds();
+        thrust.x -= 1.0;
     }
 
     if input.pressed(KeyCode::Up) {
-        accel.y += 500.0 * time.delta_seconds();
+        thrust.y += 1.0;
     }
 
     if input.pressed(KeyCode::Down) {
-        accel.y -= 500.0 * time.delta_seconds();
+        thrust.y -= 1.0;
     }
 
-    for mut thrust in query.iter_mut() {
-        thrust.impulse = accel;
+    if thrust == Vec2::ZERO {
+        return;
+    } else {
+        thrust = thrust.normalize();
     }
-}
 
-fn orient_player(mut query: Query<(&Velocity, &mut Transform), With<Player>>) {
-    for (velocity, mut transform) in query.iter_mut() {
-        if velocity.linvel.length() > 0.0 {
-            transform.rotation =
-                Quat::from_rotation_arc_2d(Vec2::new(0.0, 1.0), velocity.linvel.normalize());
+    for (mut transform, mut velocity, mut impulse) in query.iter_mut() {
+        //eprintln!("angle_between: {}", transform.rotation.angle_between(arc));
+        let forward = (transform.rotation * Vec3::Y).xy();
+        let forward_dot_goal = forward.dot(thrust);
+
+        // if facing ⋅ thrust is significant, rotate towards thrust
+        if (forward_dot_goal - 1.0).abs() >= f32::EPSILON {
+            // cancel any tumbling
+            velocity.angvel = 0.0;
+
+            // +ve=anticlockwise, -ve=clockwise (right hand rule)
+            let right = (transform.rotation * Vec3::X).xy();
+            let right_dot_goal = right.dot(thrust);
+            let sign = -f32::copysign(1.0, right_dot_goal);
+
+            // avoid overshoot
+            let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
+            let rotation_angle = (sign * 2.0 * PI * time.delta_seconds()).min(max_angle);
+
+            transform.rotate_z(rotation_angle);
+        }
+        // otherwise, apply thrust in the direction we are now facing
+        else {
+            impulse.impulse = thrust * 750.0 * time.delta_seconds();
         }
     }
 }
 
-fn cap_velocity(mut query: Query<&mut Velocity, With<Player>>) {
+fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
     for mut velocity in query.iter_mut() {
-        velocity.linvel = velocity.linvel.clamp_length_max(2500.0);
+        velocity.linvel = velocity.linvel.clamp_length_max(3000.0);
     }
 }
