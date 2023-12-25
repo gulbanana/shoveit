@@ -11,10 +11,10 @@
 	"iid": "8aeead20-8990-11ee-9245-9d5f7c99c0c3",
 	"jsonVersion": "1.4.1",
 	"appBuildId": 471015,
-	"nextUid": 1186,
+	"nextUid": 1189,
 	"identifierStyle": "Lowercase",
 	"toc": [],
-	"worldLayout": "Free",
+	"worldLayout": "LinearHorizontal",
 	"worldGridWidth": 256,
 	"worldGridHeight": 256,
 	"defaultLevelWidth": 2560,
@@ -1563,7 +1563,7 @@
 		},
 		{
 			"__type": "Tiles",
-			"identifier": "floor",
+			"identifier": "floors",
 			"type": "Tiles",
 			"uid": 814,
 			"doc": null,
@@ -1588,7 +1588,7 @@
 			"intGridValuesGroups": [],
 			"autoRuleGroups": [],
 			"autoSourceLayerDefUid": null,
-			"tilesetDefUid": 804,
+			"tilesetDefUid": 1188,
 			"tilePivotX": 0,
 			"tilePivotY": 0
 		}
@@ -1670,14 +1670,36 @@
 			}
 		},
 		{
+			"__cWid": 16,
+			"__cHei": 16,
+			"identifier": "walls_hell",
+			"uid": 1186,
+			"relPath": "tileset-walls-hell.png",
+			"embedAtlas": null,
+			"pxWid": 4096,
+			"pxHei": 4096,
+			"tileGridSize": 256,
+			"spacing": 0,
+			"padding": 0,
+			"tags": [],
+			"tagsSourceEnumUid": null,
+			"enumTags": [],
+			"customData": [],
+			"savedSelections": [],
+			"cachedPixelData": {
+				"opaqueTiles": "0000000000000000000000000000000000100000000000000000000000000100000000000000000000000000000000000010000000000000000000000000000000000000000000000011001010000000001100010000000000000010100000000000000000010010000000000011100000000000000100100000000000000000",
+				"averageColors": "00000000000000000000000000000000000000000000000000000000000000000000f721f721f7210000f721f721f7210000f8210000f821f721f821000000000000f721f721f7210000f8210000f8210000f8210000000000007821000000000000f721f721f7210000f721f721f7210000f8210000f8217821f7217821000000000000000000000000000000000000000000000000000000007821000000000000e721f721e7210000e721f721e7210000d8210000d821f721d8210000c8210000f721f721f7210000f8210000f8210000f8210000782100000000000000000000e721f721e7210000e721f721e7210000d8210000f721f721f7217821000000000000782178210000000078210000782100000000f8210000f8210000000000007821f721f72178217821f721f721f72178217821f721f721f7210000000000007821f721f72178210000f721f721f7210000000000000000782100000000000000007821782100007821f721f721f721782100007821000048217821000000007821f721f721782178217821782178210000f721f721f7217821f721782100000000f721f7210000f721f721f72100007821f721f721f7217821f721782100007821f721f7217821f721f721f72100000000f721f721f7217821f72178210000000000000000000078210000782100000000000078210000482178210000"
+			}
+		},
+		{
 			"__cWid": 1,
-			"__cHei": 1,
-			"identifier": "floor_forest",
-			"uid": 804,
-			"relPath": "tileset-floor-forest.png",
+			"__cHei": 2,
+			"identifier": "floors",
+			"uid": 1188,
+			"relPath": "tileset-floors.png",
 			"embedAtlas": null,
 			"pxWid": 1024,
-			"pxHei": 1024,
+			"pxHei": 2048,
 			"tileGridSize": 1024,
 			"spacing": 0,
 			"padding": 0,
@@ -1686,7 +1708,7 @@
 			"enumTags": [],
 			"customData": [],
 			"savedSelections": [],
-			"cachedPixelData": { "opaqueTiles": "1", "averageColors": "f754" }
+			"cachedPixelData": { "opaqueTiles": "11", "averageColors": "f754f222" }
 		}
 	], "enums": [], "externalEnums": [], "levelFields": [] },
 	"levels": [
@@ -1694,8 +1716,8 @@
 			"identifier": "level_0",
 			"iid": "5d1b9ff0-8990-11ee-87ff-9146de9620de",
 			"uid": 631,
-			"worldX": 0,
-			"worldY": 0,
+			"worldX": -1,
+			"worldY": -1,
 			"worldDepth": 0,
 			"pxWid": 5120,
 			"pxHei": 3328,
@@ -1955,12 +1977,12 @@
 						{ "px": [2048,1280], "src": [1280,256], "f": 0, "t": 21, "d": [1141,108], "a": 1 }
 					],
 					"seed": 2406959,
-					"overrideTilesetUid": null,
+					"overrideTilesetUid": 633,
 					"gridTiles": [],
 					"entityInstances": []
 				},
 				{
-					"__identifier": "floor",
+					"__identifier": "floors",
 					"__type": "Tiles",
 					"__cWid": 5,
 					"__cHei": 4,
@@ -1968,8 +1990,8 @@
 					"__opacity": 1,
 					"__pxTotalOffsetX": 0,
 					"__pxTotalOffsetY": 0,
-					"__tilesetDefUid": 804,
-					"__tilesetRelPath": "tileset-floor-forest.png",
+					"__tilesetDefUid": 1188,
+					"__tilesetRelPath": "tileset-floors.png",
 					"iid": "c51bb6e0-8990-11ee-a230-9f27f547ce76",
 					"levelId": 631,
 					"layerDefUid": 814,
@@ -1980,7 +2002,7 @@
 					"intGridCsv": [],
 					"autoLayerTiles": [],
 					"seed": 3228621,
-					"overrideTilesetUid": null,
+					"overrideTilesetUid": 1188,
 					"gridTiles": [
 						{ "px": [0,0], "src": [0,0], "f": 0, "t": 0, "d": [0], "a": 1 },
 						{ "px": [1024,0], "src": [0,0], "f": 0, "t": 0, "d": [1], "a": 1 },
