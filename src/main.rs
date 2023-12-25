@@ -10,8 +10,16 @@ use bevy_rapier2d::prelude::*;
 struct WallTile;
 
 #[derive(Bundle, LdtkIntCell)]
-struct TileBundle {
+struct WallBundle {
     marker: WallTile,
+}
+
+#[derive(Default, Component)]
+struct PitTile;
+
+#[derive(Bundle, LdtkIntCell)]
+struct PitBundle {
+    marker: PitTile,
 }
 
 #[derive(Default, Component)]
@@ -55,11 +63,19 @@ fn main() {
         .add_systems(Startup, setup_game)
         .add_systems(
             Update,
-            (setup_level, setup_player, move_player, cap_player_velocity),
+            (
+                setup_walls,
+                setup_pits,
+                setup_player,
+                move_player,
+                cap_player_velocity,
+                fall_into_pit,
+            ),
         )
         .insert_resource(LevelSelection::Index(0))
         .register_ldtk_entity::<PlayerBundle>("player")
-        .register_ldtk_int_cell::<TileBundle>(1)
+        .register_ldtk_int_cell::<WallBundle>(1)
+        .register_ldtk_int_cell::<PitBundle>(2)
         .run();
 }
 
@@ -93,12 +109,22 @@ fn setup_game(
     commands.spawn(RigidBody::Dynamic);
 }
 
-fn setup_level(mut commands: Commands, mut query: Query<Entity, Added<WallTile>>) {
+fn setup_walls(mut commands: Commands, mut query: Query<Entity, Added<WallTile>>) {
     for id in query.iter_mut() {
         commands
             .entity(id)
             .insert(Collider::cuboid(128.0, 128.0))
             .insert(Restitution::coefficient(1.0));
+    }
+}
+
+fn setup_pits(mut commands: Commands, mut query: Query<Entity, Added<PitTile>>) {
+    for id in query.iter_mut() {
+        commands
+            .entity(id)
+            .insert(Collider::cuboid(64.0, 64.0))
+            .insert(Sensor)
+            .insert(ActiveEvents::COLLISION_EVENTS);
     }
 }
 
@@ -161,7 +187,7 @@ fn move_player(
 
             // avoid overshoot
             let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
-            let rotation_angle = (sign * 2.0 * PI * time.delta_seconds()).min(max_angle);
+            let rotation_angle = (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
 
             transform.rotate_z(rotation_angle);
         }
@@ -175,5 +201,20 @@ fn move_player(
 fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
     for mut velocity in query.iter_mut() {
         velocity.linvel = velocity.linvel.clamp_length_max(3000.0);
+    }
+}
+
+fn fall_into_pit(
+    mut collision_events: EventReader<CollisionEvent>,
+    level_query: Query<Entity, With<Handle<LdtkLevel>>>,
+    mut commands: Commands,
+) {
+    for collision_event in collision_events.iter() {
+        match collision_event {
+            CollisionEvent::Started(_, _, _) => {
+                commands.entity(level_query.single()).insert(Respawn);
+            }
+            _ => (),
+        };
     }
 }
