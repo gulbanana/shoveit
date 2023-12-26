@@ -8,23 +8,26 @@ use std::f32::consts::PI;
 mod loader;
 
 #[derive(Default, Component)]
+struct Orb;
+
+#[derive(Default, Component)]
 struct Player;
 
-#[derive(Bundle)]
-struct ControlledBundle {
-    rigid_body: RigidBody,
-    velocity: Velocity,
-    thrust: ExternalImpulse,
-    collider: Collider,
-    mass: ColliderMassProperties,
-    restitution: Restitution,
-}
+#[derive(Default, Component)]
+struct Enemy;
 
 #[derive(Bundle, LdtkEntity)]
 struct PlayerBundle {
+    orb: Orb,
     player: Player,
-    #[from_entity_instance]
-    instance: EntityInstance,
+    #[sprite_sheet_bundle]
+    sprite_bundle: SpriteSheetBundle,
+}
+
+#[derive(Bundle, LdtkEntity)]
+struct EnemyBundle {
+    orb: Orb,
+    enemy: Enemy,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
 }
@@ -58,7 +61,7 @@ fn main() {
             Update,
             (
                 loader::init_cells,
-                loader::init_player,
+                loader::init_entity,
                 loader::detect_loaded,
             )
                 .run_if(in_state(AppState::Loading)),
@@ -72,10 +75,12 @@ fn main() {
                 cap_player_velocity,
                 fall_into_pit,
                 respawn_after_death,
+                advance_after_victory,
             )
                 .run_if(in_state(AppState::Playing)),
         )
         .register_ldtk_entity::<PlayerBundle>("player")
+        .register_ldtk_entity::<EnemyBundle>("enemy")
         .run();
 }
 
@@ -164,20 +169,36 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 fn fall_into_pit(
     mut commands: Commands,
     mut events: EventReader<CollisionEvent>,
-    query: Query<Entity, With<Player>>,
+    query: Query<Entity, With<Orb>>,
 ) {
     for collision_event in events.iter() {
-        if let CollisionEvent::Started(_, _, _) = collision_event {
-            commands.entity(query.single()).despawn();
+        if let CollisionEvent::Started(e1, e2, _) = collision_event {
+            for entity in query.iter() {
+                if e1 == &entity || e2 == &entity {
+                    commands.entity(entity).despawn();
+                }
+            }
         }
     }
 }
 
 fn respawn_after_death(
     mut commands: Commands,
-    level: Res<LevelSelection>,
     mut next_state: ResMut<NextState<AppState>>,
-    query: Query<&Player>,
+    players: Query<&Player>,
+    level: Query<Entity, With<Handle<LdtkLevel>>>,
+) {
+    if players.is_empty() {
+        commands.entity(level.single()).insert(Respawn);
+        next_state.set(AppState::Loading);
+    }
+}
+
+fn advance_after_victory(
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
+    level: Res<LevelSelection>,
+    query: Query<&Enemy>,
 ) {
     if query.is_empty() {
         match level.into_inner() {

@@ -56,7 +56,7 @@ pub fn enable_tiles(
                 Visibility::Visible
             } else {
                 Visibility::Hidden
-            };
+            }
         }
 
         for mut element in elements.iter_mut() {
@@ -64,7 +64,7 @@ pub fn enable_tiles(
                 Visibility::Hidden
             } else {
                 Visibility::Visible
-            };
+            }
         }
     }
 }
@@ -93,7 +93,7 @@ pub fn init_cells(
     }
 }
 
-pub fn init_player(mut commands: Commands, mut query: Query<Entity, Added<super::Player>>) {
+pub fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Orb>>) {
     for id in query.iter_mut() {
         commands
             .entity(id)
