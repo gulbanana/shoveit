@@ -1,26 +1,11 @@
-use std::f32::consts::PI;
-
 use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
 use bevy::render::camera::ScalingMode;
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
+use std::f32::consts::PI;
 
-#[derive(Default, Component)]
-struct WallTile;
-
-#[derive(Bundle, LdtkIntCell)]
-struct WallBundle {
-    marker: WallTile,
-}
-
-#[derive(Default, Component)]
-struct PitTile;
-
-#[derive(Bundle, LdtkIntCell)]
-struct PitBundle {
-    marker: PitTile,
-}
+mod loader;
 
 #[derive(Default, Component)]
 struct Player;
@@ -68,17 +53,18 @@ fn main() {
             //RapierDebugRenderPlugin::default(),
         ))
         .add_state::<AppState>()
-        .add_systems(Startup, setup_game)
+        .add_systems(Startup, (setup, loader::setup))
         .add_systems(
             Update,
             (
-                setup_walls,
-                setup_pits,
-                setup_player,
-                detect_loading_complete,
+                loader::init_cells,
+                loader::init_player,
+                loader::detect_loaded,
             )
                 .run_if(in_state(AppState::Loading)),
         )
+        .add_systems(OnEnter(AppState::Loading), loader::enable_tiles(false))
+        .add_systems(OnEnter(AppState::Playing), loader::enable_tiles(true))
         .add_systems(
             Update,
             (
@@ -90,16 +76,10 @@ fn main() {
                 .run_if(in_state(AppState::Playing)),
         )
         .register_ldtk_entity::<PlayerBundle>("player")
-        .register_ldtk_int_cell::<WallBundle>(1)
-        .register_ldtk_int_cell::<PitBundle>(2)
         .run();
 }
 
-fn setup_game(
-    mut commands: Commands,
-    asset_server: Res<AssetServer>,
-    mut rapier: ResMut<RapierConfiguration>,
-) {
+fn setup(mut commands: Commands, mut rapier: ResMut<RapierConfiguration>) {
     rapier.gravity = Vec2::ZERO;
 
     let bounds = Vec3::new(4096.0, 2304.0, 0.0);
@@ -116,57 +96,6 @@ fn setup_game(
         },
         ..default()
     });
-
-    commands.spawn(LdtkWorldBundle {
-        ldtk_handle: asset_server.load("levels.ldtk"),
-        ..default()
-    });
-
-    commands.insert_resource(LevelSelection::Index(0))
-}
-
-fn setup_walls(mut commands: Commands, mut query: Query<Entity, Added<WallTile>>) {
-    for id in query.iter_mut() {
-        commands
-            .entity(id)
-            .insert(Collider::cuboid(128.0, 128.0))
-            .insert(Restitution::coefficient(1.0));
-    }
-}
-
-fn setup_pits(mut commands: Commands, mut query: Query<Entity, Added<PitTile>>) {
-    for id in query.iter_mut() {
-        commands
-            .entity(id)
-            .insert(Collider::cuboid(64.0, 64.0))
-            .insert(Sensor)
-            .insert(ActiveEvents::COLLISION_EVENTS);
-    }
-}
-
-fn setup_player(mut commands: Commands, mut query: Query<Entity, Added<Player>>) {
-    for id in query.iter_mut() {
-        commands
-            .entity(id)
-            .insert(RigidBody::Dynamic)
-            .insert(Velocity::default())
-            .insert(ExternalImpulse::default())
-            .insert(Collider::ball(100.0))
-            .insert(ColliderMassProperties::Mass(1.0))
-            .insert(Restitution::coefficient(1.0));
-    }
-}
-
-fn detect_loading_complete(
-    mut events: EventReader<LevelEvent>,
-    mut next_state: ResMut<NextState<AppState>>,
-) {
-    for level_event in events.iter() {
-        match level_event {
-            LevelEvent::Transformed(_iid) => next_state.set(AppState::Playing),
-            _ => (),
-        }
-    }
 }
 
 fn move_player(
