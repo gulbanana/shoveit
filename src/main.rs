@@ -44,6 +44,13 @@ struct PlayerBundle {
     sprite_bundle: SpriteSheetBundle,
 }
 
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    Loading,
+    Playing,
+}
+
 fn main() {
     App::new()
         .add_plugins((
@@ -60,6 +67,7 @@ fn main() {
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
             //RapierDebugRenderPlugin::default(),
         ))
+        .add_state::<AppState>()
         .add_systems(Startup, setup_game)
         .add_systems(
             Update,
@@ -67,10 +75,19 @@ fn main() {
                 setup_walls,
                 setup_pits,
                 setup_player,
+                detect_loading_complete,
+            )
+                .run_if(in_state(AppState::Loading)),
+        )
+        .add_systems(
+            Update,
+            (
                 move_player,
                 cap_player_velocity,
                 fall_into_pit,
-            ),
+                respawn_after_death,
+            )
+                .run_if(in_state(AppState::Playing)),
         )
         .register_ldtk_entity::<PlayerBundle>("player")
         .register_ldtk_int_cell::<WallBundle>(1)
@@ -140,6 +157,18 @@ fn setup_player(mut commands: Commands, mut query: Query<Entity, Added<Player>>)
     }
 }
 
+fn detect_loading_complete(
+    mut events: EventReader<LevelEvent>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for level_event in events.iter() {
+        match level_event {
+            LevelEvent::Transformed(_iid) => next_state.set(AppState::Playing),
+            _ => (),
+        }
+    }
+}
+
 fn move_player(
     time: Res<Time>,
     mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<Player>>,
@@ -205,14 +234,29 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 
 fn fall_into_pit(
     mut commands: Commands,
-    mut collision_events: EventReader<CollisionEvent>,
-    level: Res<LevelSelection>,
+    mut events: EventReader<CollisionEvent>,
+    query: Query<Entity, With<Player>>,
 ) {
-    if let LevelSelection::Index(i) = level.into_inner() {
-        for collision_event in collision_events.iter() {
-            if let CollisionEvent::Started(_, _, _) = collision_event {
+    for collision_event in events.iter() {
+        if let CollisionEvent::Started(_, _, _) = collision_event {
+            commands.entity(query.single()).despawn();
+        }
+    }
+}
+
+fn respawn_after_death(
+    mut commands: Commands,
+    level: Res<LevelSelection>,
+    mut next_state: ResMut<NextState<AppState>>,
+    query: Query<&Player>,
+) {
+    if query.is_empty() {
+        match level.into_inner() {
+            LevelSelection::Index(i) => {
                 commands.insert_resource(LevelSelection::Index(1 - i));
+                next_state.set(AppState::Loading);
             }
+            _ => (),
         }
     }
 }
