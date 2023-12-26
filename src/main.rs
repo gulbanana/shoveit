@@ -72,7 +72,6 @@ fn main() {
                 fall_into_pit,
             ),
         )
-        .insert_resource(LevelSelection::Index(0))
         .register_ldtk_entity::<PlayerBundle>("player")
         .register_ldtk_int_cell::<WallBundle>(1)
         .register_ldtk_int_cell::<PitBundle>(2)
@@ -106,7 +105,7 @@ fn setup_game(
         ..default()
     });
 
-    commands.spawn(RigidBody::Dynamic);
+    commands.insert_resource(LevelSelection::Index(0))
 }
 
 fn setup_walls(mut commands: Commands, mut query: Query<Entity, Added<WallTile>>) {
@@ -205,16 +204,15 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 }
 
 fn fall_into_pit(
-    mut collision_events: EventReader<CollisionEvent>,
-    level_query: Query<Entity, With<Handle<LdtkLevel>>>,
     mut commands: Commands,
+    mut collision_events: EventReader<CollisionEvent>,
+    level: Res<LevelSelection>,
 ) {
-    for collision_event in collision_events.iter() {
-        match collision_event {
-            CollisionEvent::Started(_, _, _) => {
-                commands.entity(level_query.single()).insert(Respawn);
+    if let LevelSelection::Index(i) = level.into_inner() {
+        for collision_event in collision_events.iter() {
+            if let CollisionEvent::Started(_, _, _) = collision_event {
+                commands.insert_resource(LevelSelection::Index(1 - i));
             }
-            _ => (),
-        };
+        }
     }
 }
