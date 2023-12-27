@@ -4,16 +4,21 @@ version = "1.0.0"
 edition = "2021"
 
 [dependencies]
+anyhow = "1.0.77"
 bevy = "0.11"
 bevy_ecs_ldtk = "0.8.0"
 bevy_rapier2d = "0.22"
+serde = "1.0.193"
+serde_json = "1.0.108"
 
 [profile.dev]
 opt-level = 1
 
 [profile.dev.package."*"]
-opt-level = 3
 codegen-units = 1
+opt-level = 3
 
 [profile.release]
 codegen-units = 1
+lto = true
+strip = true

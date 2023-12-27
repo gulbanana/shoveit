@@ -1,11 +1,22 @@
-use bevy::math::Vec3Swizzles;
 use bevy::prelude::*;
-use bevy::render::camera::ScalingMode;
+use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 use std::f32::consts::PI;
 
 mod loader;
+
+#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+enum AppState {
+    #[default]
+    Loading,
+    Playing,
+}
+
+#[derive(Event)]
+enum DetectionEvent {
+    OrbPit(Entity),
+}
 
 #[derive(Default, Component)]
 struct Orb;
@@ -15,29 +26,6 @@ struct Player;
 
 #[derive(Default, Component)]
 struct Enemy;
-
-#[derive(Bundle, LdtkEntity)]
-struct PlayerBundle {
-    orb: Orb,
-    player: Player,
-    #[sprite_sheet_bundle]
-    sprite_bundle: SpriteSheetBundle,
-}
-
-#[derive(Bundle, LdtkEntity)]
-struct EnemyBundle {
-    orb: Orb,
-    enemy: Enemy,
-    #[sprite_sheet_bundle]
-    sprite_bundle: SpriteSheetBundle,
-}
-
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
-enum AppState {
-    #[default]
-    Loading,
-    Playing,
-}
 
 fn main() {
     App::new()
@@ -51,37 +39,32 @@ fn main() {
                     }),
                     ..default()
                 }),
-            LdtkPlugin,
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
             //RapierDebugRenderPlugin::default(),
+            loader::LoaderPlugin,
         ))
         .add_state::<AppState>()
-        .add_systems(Startup, (setup, loader::setup))
-        .add_systems(
-            Update,
-            (
-                loader::init_cells,
-                loader::init_entity,
-                loader::detect_loaded,
-            )
-                .run_if(in_state(AppState::Loading)),
-        )
-        .add_systems(OnEnter(AppState::Loading), loader::enable_tiles(false))
-        .add_systems(OnEnter(AppState::Playing), loader::enable_tiles(true))
+        .add_event::<DetectionEvent>()
+        .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
                 move_player,
                 cap_player_velocity,
-                fall_into_pit,
+                detect_collisions,
+                fall_into_pit.after(detect_collisions),
                 respawn_after_death,
                 advance_after_victory,
             )
                 .run_if(in_state(AppState::Playing)),
         )
-        .register_ldtk_entity::<PlayerBundle>("player")
-        .register_ldtk_entity::<EnemyBundle>("enemy")
         .run();
+}
+
+fn handle(result: In<anyhow::Result<()>>) {
+    if let In(Result::Err(cause)) = result {
+        error!("{}", cause);
+    }
 }
 
 fn setup(mut commands: Commands, mut rapier: ResMut<RapierConfiguration>) {
@@ -166,17 +149,27 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
     }
 }
 
-fn fall_into_pit(
-    mut commands: Commands,
-    mut events: EventReader<CollisionEvent>,
+fn detect_collisions(
+    mut input: EventReader<CollisionEvent>,
+    mut output: EventWriter<DetectionEvent>,
     query: Query<Entity, With<Orb>>,
 ) {
-    for collision_event in events.iter() {
-        if let CollisionEvent::Started(e1, e2, _) = collision_event {
+    for event in input.iter() {
+        if let CollisionEvent::Started(e1, e2, _) = event {
             for entity in query.iter() {
                 if e1 == &entity || e2 == &entity {
-                    commands.entity(entity).despawn();
+                    output.send(DetectionEvent::OrbPit(entity));
                 }
+            }
+        }
+    }
+}
+
+fn fall_into_pit(mut commands: Commands, mut events: EventReader<DetectionEvent>) {
+    for event in events.iter() {
+        match event {
+            DetectionEvent::OrbPit(entity) => {
+                commands.entity(*entity).despawn();
             }
         }
     }
@@ -185,8 +178,8 @@ fn fall_into_pit(
 fn respawn_after_death(
     mut commands: Commands,
     mut next_state: ResMut<NextState<AppState>>,
-    players: Query<&Player>,
     level: Query<Entity, With<Handle<LdtkLevel>>>,
+    players: Query<&Player>,
 ) {
     if players.is_empty() {
         commands.entity(level.single()).insert(Respawn);
@@ -198,9 +191,9 @@ fn advance_after_victory(
     mut commands: Commands,
     mut next_state: ResMut<NextState<AppState>>,
     level: Res<LevelSelection>,
-    query: Query<&Enemy>,
+    enemies: Query<&Enemy>,
 ) {
-    if query.is_empty() {
+    if enemies.is_empty() {
         match level.into_inner() {
             LevelSelection::Index(i) => {
                 commands.insert_resource(LevelSelection::Index(1 - i));

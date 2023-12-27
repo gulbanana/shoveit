@@ -177,9 +177,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.76"
+version = "1.0.77"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "59d2a3357dde987206219e78ecfbbb6e8dad06cbb65292758d3270e6254f7355"
+checksum = "c9d19de80eff169429ac1e9f48fffb163916b448a44e8e046186232046d9e1f9"
 
 [[package]]
 name = "approx"
@@ -3098,9 +3098,12 @@ checksum = "a7cee0529a6d40f580e7a5e6c495c8fbfe21b7b52795ed4bb5e62cdf92bc6380"
 name = "shoveit"
 version = "1.0.0"
 dependencies = [
+ "anyhow",
  "bevy",
  "bevy_ecs_ldtk",
  "bevy_rapier2d",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
