@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::utils::HashSet;
 use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -6,7 +7,7 @@ use std::f32::consts::PI;
 
 mod loader;
 
-#[derive(Debug, Clone, Copy, Default, Eq, PartialEq, Hash, States)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
     #[default]
     Loading,
@@ -15,8 +16,16 @@ enum AppState {
 
 #[derive(Event)]
 enum DetectionEvent {
+    OrbWall,
+    OrbOrb,
     OrbPit(Entity),
 }
+
+#[derive(Default, Component)]
+struct WallTile;
+
+#[derive(Default, Component)]
+struct PitTile;
 
 #[derive(Default, Component)]
 struct Orb;
@@ -52,7 +61,7 @@ fn main() {
                 move_player,
                 cap_player_velocity,
                 detect_collisions,
-                fall_into_pit.after(detect_collisions),
+                on_collision.after(detect_collisions),
                 respawn_after_death,
                 advance_after_victory,
             )
@@ -152,23 +161,69 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 fn detect_collisions(
     mut input: EventReader<CollisionEvent>,
     mut output: EventWriter<DetectionEvent>,
-    query: Query<Entity, With<Orb>>,
+    pit_query: Query<Entity, With<PitTile>>,
+    wall_query: Query<Entity, With<WallTile>>,
 ) {
+    let mut pit_entities = HashSet::new();
+    for entity in pit_query.iter() {
+        pit_entities.insert(entity);
+    }
+
+    let mut wall_entities = HashSet::new();
+    for entity in wall_query.iter() {
+        wall_entities.insert(entity);
+    }
+
+    let mut fallen_orbs = HashSet::new();
+
     for event in input.iter() {
         if let CollisionEvent::Started(e1, e2, _) = event {
-            for entity in query.iter() {
-                if e1 == &entity || e2 == &entity {
-                    output.send(DetectionEvent::OrbPit(entity));
-                }
+            if pit_entities.contains(e1) && !fallen_orbs.contains(e2) {
+                fallen_orbs.insert(e2);
+                output.send(DetectionEvent::OrbPit(*e2));
+            } else if pit_entities.contains(e2) && !fallen_orbs.contains(e1) {
+                fallen_orbs.insert(e1);
+                output.send(DetectionEvent::OrbPit(*e1));
+            } else if wall_entities.contains(e1) || wall_entities.contains(e2) {
+                output.send(DetectionEvent::OrbWall);
+            } else {
+                output.send(DetectionEvent::OrbOrb);
             }
         }
     }
 }
 
-fn fall_into_pit(mut commands: Commands, mut events: EventReader<DetectionEvent>) {
+fn on_collision(
+    assets: Res<AssetServer>,
+    mut commands: Commands,
+    mut events: EventReader<DetectionEvent>,
+    players: Query<Entity, With<Player>>,
+) {
     for event in events.iter() {
         match event {
+            DetectionEvent::OrbWall => {
+                commands.spawn(AudioBundle {
+                    source: assets.load("pobble.ogg"),
+                    ..default()
+                });
+            }
+            DetectionEvent::OrbOrb => {
+                commands.spawn(AudioBundle {
+                    source: assets.load("pobblebonk.ogg"),
+                    ..default()
+                });
+            }
             DetectionEvent::OrbPit(entity) => {
+                let all_players = HashSet::from_iter(players.iter());
+                commands.spawn(AudioBundle {
+                    source: assets.load(if all_players.contains(entity) {
+                        "player-fall.ogg"
+                    } else {
+                        "enemy-fall.ogg"
+                    }),
+                    ..default()
+                });
+
                 commands.entity(*entity).despawn();
             }
         }

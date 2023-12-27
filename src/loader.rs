@@ -123,11 +123,12 @@ fn init_cells(
         match cell.value {
             WALL_TILE => {
                 batch
+                    .insert(super::WallTile)
                     .insert(Collider::cuboid(128.0, 128.0))
                     .insert(Restitution::coefficient(1.0));
             }
             PIT_TILE => {
-                batch.insert(Sensor).insert(ActiveEvents::COLLISION_EVENTS);
+                batch.insert(super::PitTile).insert(Sensor);
 
                 if let Some(metadata) = metadata_by_coords.get(coords) {
                     let data: CustomData =
@@ -162,7 +163,8 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Orb
             .insert(ExternalImpulse::default())
             .insert(Collider::ball(100.0))
             .insert(ColliderMassProperties::Mass(1.0))
-            .insert(Restitution::coefficient(1.0));
+            .insert(Restitution::coefficient(1.0))
+            .insert(ActiveEvents::COLLISION_EVENTS);
     }
 }
 
