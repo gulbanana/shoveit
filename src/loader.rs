@@ -1,4 +1,4 @@
-use super::AppState;
+use super::{AppState, Tile};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
@@ -33,7 +33,7 @@ impl CustomData {
 
 #[derive(Bundle, LdtkEntity)]
 struct PlayerBundle {
-    orb: super::Orb,
+    orb: super::Actor,
     player: super::Player,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
@@ -41,7 +41,7 @@ struct PlayerBundle {
 
 #[derive(Bundle, LdtkEntity)]
 struct EnemyBundle {
-    orb: super::Orb,
+    orb: super::Actor,
     enemy: super::Enemy,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
@@ -131,12 +131,12 @@ fn init_cells(
         match cell.value {
             WALL_TILE => {
                 batch
-                    .insert(super::WallTile)
+                    .insert(Tile::Wall)
                     .insert(Collider::cuboid(128.0, 128.0))
                     .insert(Restitution::coefficient(1.0));
             }
             PIT_TILE => {
-                batch.insert(super::PitTile).insert(Sensor);
+                batch.insert(Tile::Pit).insert(Sensor);
 
                 if let Some(metadata) = metadata_by_coords.get(coords) {
                     let data: CustomData =
@@ -162,7 +162,7 @@ fn init_cells(
     Ok(())
 }
 
-fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Orb>>) {
+fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Actor>>) {
     for id in query.iter_mut() {
         commands
             .entity(id)

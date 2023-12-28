@@ -14,25 +14,30 @@ enum AppState {
     Playing,
 }
 
+/// Interactions detected by physics
 #[derive(Event)]
-enum DetectionEvent {
-    OrbWall,
-    OrbOrb,
-    OrbPit(Entity),
+enum InteractionEvent {
+    ActorHitActor,
+    ActorHitWall,
+    ActorEnterPit(Entity),
 }
 
-#[derive(Default, Component)]
-struct WallTile;
+/// Has interactions on contact
+#[derive(Component)]
+enum Tile {
+    Wall,
+    Pit,
+}
 
+/// Moves around the level, interacting with other actors and with tiles
 #[derive(Default, Component)]
-struct PitTile;
+struct Actor;
 
-#[derive(Default, Component)]
-struct Orb;
-
+/// Marks pc, who must remain alive
 #[derive(Default, Component)]
 struct Player;
 
+/// Marks npc, who can be defeated
 #[derive(Default, Component)]
 struct Enemy;
 
@@ -53,7 +58,7 @@ fn main() {
             loader::LoaderPlugin,
         ))
         .add_state::<AppState>()
-        .add_event::<DetectionEvent>()
+        .add_event::<InteractionEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -160,18 +165,21 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 
 fn detect_collisions(
     mut input: EventReader<CollisionEvent>,
-    mut output: EventWriter<DetectionEvent>,
-    pit_query: Query<Entity, With<PitTile>>,
-    wall_query: Query<Entity, With<WallTile>>,
+    mut output: EventWriter<InteractionEvent>,
+    query: Query<(Entity, &Tile)>,
 ) {
     let mut pit_entities = HashSet::new();
-    for entity in pit_query.iter() {
-        pit_entities.insert(entity);
-    }
-
     let mut wall_entities = HashSet::new();
-    for entity in wall_query.iter() {
-        wall_entities.insert(entity);
+
+    for (entity, tile) in query.iter() {
+        match tile {
+            Tile::Pit => {
+                pit_entities.insert(entity);
+            }
+            Tile::Wall => {
+                wall_entities.insert(entity);
+            }
+        }
     }
 
     let mut fallen_orbs = HashSet::new();
@@ -180,14 +188,14 @@ fn detect_collisions(
         if let CollisionEvent::Started(e1, e2, _) = event {
             if pit_entities.contains(e1) && !fallen_orbs.contains(e2) {
                 fallen_orbs.insert(e2);
-                output.send(DetectionEvent::OrbPit(*e2));
+                output.send(InteractionEvent::ActorEnterPit(*e2));
             } else if pit_entities.contains(e2) && !fallen_orbs.contains(e1) {
                 fallen_orbs.insert(e1);
-                output.send(DetectionEvent::OrbPit(*e1));
+                output.send(InteractionEvent::ActorEnterPit(*e1));
             } else if wall_entities.contains(e1) || wall_entities.contains(e2) {
-                output.send(DetectionEvent::OrbWall);
+                output.send(InteractionEvent::ActorHitWall);
             } else {
-                output.send(DetectionEvent::OrbOrb);
+                output.send(InteractionEvent::ActorHitActor);
             }
         }
     }
@@ -196,24 +204,24 @@ fn detect_collisions(
 fn on_collision(
     assets: Res<AssetServer>,
     mut commands: Commands,
-    mut events: EventReader<DetectionEvent>,
+    mut events: EventReader<InteractionEvent>,
     players: Query<Entity, With<Player>>,
 ) {
     for event in events.iter() {
         match event {
-            DetectionEvent::OrbWall => {
+            InteractionEvent::ActorHitWall => {
                 commands.spawn(AudioBundle {
                     source: assets.load("pobble.ogg"),
                     ..default()
                 });
             }
-            DetectionEvent::OrbOrb => {
+            InteractionEvent::ActorHitActor => {
                 commands.spawn(AudioBundle {
                     source: assets.load("pobblebonk.ogg"),
                     ..default()
                 });
             }
-            DetectionEvent::OrbPit(entity) => {
+            InteractionEvent::ActorEnterPit(entity) => {
                 let all_players = HashSet::from_iter(players.iter());
                 commands.spawn(AudioBundle {
                     source: assets.load(if all_players.contains(entity) {
@@ -249,12 +257,9 @@ fn advance_after_victory(
     enemies: Query<&Enemy>,
 ) {
     if enemies.is_empty() {
-        match level.into_inner() {
-            LevelSelection::Index(i) => {
-                commands.insert_resource(LevelSelection::Index(1 - i));
-                next_state.set(AppState::Loading);
-            }
-            _ => (),
+        if let LevelSelection::Index(i) = level.into_inner() {
+            commands.insert_resource(LevelSelection::Index(1 - i));
+            next_state.set(AppState::Loading);
         }
     }
 }
