@@ -67,3 +67,5 @@ xcrun notarytool submit \
     "$package"
 
 xcrun stapler staple "$package"
+
+mv "$package" "target/macos/"
