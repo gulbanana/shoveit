@@ -73,10 +73,18 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .insert(LoadingScreenElement);
 }
 
-fn detect_loaded(mut events: EventReader<LevelEvent>, mut next_state: ResMut<NextState<AppState>>) {
+fn detect_loaded(
+    mut events: EventReader<LevelEvent>,
+    mut next_state: ResMut<NextState<AppState>>,
+    level: Res<LevelSelection>,
+) {
+    if let LevelSelection::Index(i) = level.into_inner() {
+        info!("Loaded level {i}");
+    }
+
     for level_event in events.iter() {
         match level_event {
-            LevelEvent::Transformed(_iid) => next_state.set(AppState::Playing),
+            LevelEvent::Spawned(_iid) => next_state.set(AppState::Playing),
             _ => (),
         }
     }
