@@ -3,9 +3,14 @@ use bevy::utils::HashSet;
 use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
+use bevy_tweening::lens::TransformScaleLens;
+use bevy_tweening::*;
 use std::f32::consts::PI;
+use std::time::Duration;
 
 mod loader;
+
+const ANIMATION_FALL: u64 = 0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
@@ -55,6 +60,7 @@ fn main() {
                 }),
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
             //RapierDebugRenderPlugin::default(),
+            TweeningPlugin,
             loader::LoaderPlugin,
         ))
         .add_state::<AppState>()
@@ -66,7 +72,8 @@ fn main() {
                 move_player,
                 cap_player_velocity,
                 detect_collisions,
-                on_collision.after(detect_collisions),
+                trigger_interaction.after(detect_collisions),
+                die_after_fall,
                 respawn_after_death,
                 advance_after_victory,
             )
@@ -130,7 +137,6 @@ fn move_player(
     }
 
     for (mut transform, mut velocity, mut impulse) in query.iter_mut() {
-        //eprintln!("angle_between: {}", transform.rotation.angle_between(arc));
         let forward = (transform.rotation * Vec3::Y).xy();
         let forward_dot_goal = forward.dot(thrust);
 
@@ -201,7 +207,7 @@ fn detect_collisions(
     }
 }
 
-fn on_collision(
+fn trigger_interaction(
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut events: EventReader<InteractionEvent>,
@@ -232,9 +238,30 @@ fn on_collision(
                     ..default()
                 });
 
-                commands.entity(*entity).despawn();
+                // shrink into oblivion
+                let tween = Tween::new(
+                    EaseFunction::QuadraticIn,
+                    Duration::from_secs(1),
+                    TransformScaleLens {
+                        start: Vec3::ONE,
+                        end: Vec3::ZERO,
+                    },
+                )
+                .with_completed_event(ANIMATION_FALL);
+
+                commands
+                    .entity(*entity)
+                    .remove::<Actor>()
+                    .remove::<Collider>()
+                    .insert(Animator::new(tween));
             }
         }
+    }
+}
+
+fn die_after_fall(mut commands: Commands, mut events: EventReader<TweenCompleted>) {
+    for fallen in events.iter() {
+        commands.entity(fallen.entity).despawn();
     }
 }
 
