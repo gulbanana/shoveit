@@ -1,4 +1,4 @@
-use crate::{collision, Actor, AppState, EnemyControl, PlayerControl, Tile};
+use crate::{collision, Actor, AppState, CacheEvent, EnemyControl, PlayerControl, Tile};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
@@ -125,17 +125,17 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
 }
 
 fn detect_loaded(
-    mut events: EventReader<LevelEvent>,
     mut next_state: ResMut<NextState<AppState>>,
-    level: Res<LevelSelection>,
+    mut level_events: EventReader<LevelEvent>,
+    mut cache_events: EventWriter<CacheEvent>,
 ) {
-    if let LevelSelection::Index(i) = level.into_inner() {
-        info!("Loaded level {i}");
-    }
-
-    for level_event in events.iter() {
+    for level_event in level_events.iter() {
         match level_event {
-            LevelEvent::Spawned(_iid) => next_state.set(AppState::Playing),
+            LevelEvent::Transformed(_iid) => {
+                info!("Loaded level {_iid}");
+                next_state.set(AppState::Playing);
+                cache_events.send(CacheEvent::InvalidateColliderHierarchy)
+            }
             _ => (),
         }
     }
@@ -340,11 +340,15 @@ fn advance_after_victory(
     }
 }
 
-pub struct LoaderPlugin {
-    pub level: usize,
+struct LevelPlugin {
+    level_select: usize,
 }
 
-impl Plugin for LoaderPlugin {
+pub fn plugin(level_select: usize) -> impl Plugin {
+    LevelPlugin { level_select }
+}
+
+impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins(LdtkPlugin)
             .add_systems(Startup, setup)
@@ -359,7 +363,7 @@ impl Plugin for LoaderPlugin {
             )
             .add_systems(OnEnter(AppState::Loading), enable_tiles(false))
             .add_systems(OnEnter(AppState::Playing), enable_tiles(true))
-            .insert_resource(LevelSelection::Index(self.level))
+            .insert_resource(LevelSelection::Index(self.level_select))
             .register_ldtk_entity::<PlayerBundle>("player")
             .register_ldtk_entity::<DResBundle>("d_resignation")
             .register_ldtk_entity::<DCowBundle>("d_cowardice")

@@ -1,9 +1,6 @@
-use bevy::prelude::*;
-use bevy::utils::{HashMap, HashSet};
-use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
+use bevy::{math::Vec3Swizzles, prelude::*, render::camera::ScalingMode, utils::HashMap};
 use bevy_rapier2d::prelude::*;
-use bevy_tweening::lens::TransformScaleLens;
-use bevy_tweening::*;
+use bevy_tweening::{lens::TransformScaleLens, *};
 use std::f32::consts::PI;
 use std::time::Duration;
 
@@ -30,6 +27,11 @@ enum InteractionEvent {
     ActorHitActor,
     ActorHitWall,
     ActorEnterPit { actor: Entity, pit: Entity },
+}
+
+#[derive(Event)]
+enum CacheEvent {
+    InvalidateColliderHierarchy,
 }
 
 /// Has interactions on contact
@@ -62,10 +64,10 @@ struct AnimationCompletions {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut level = 0;
-    if let Some(arg) = args.get(1) {
-        if let Ok(index) = arg.parse() {
-            level = index;
+    let mut level_select = 0;
+    if let Some(arg1) = args.get(1) {
+        if let Ok(index) = arg1.parse() {
+            level_select = index;
         }
     }
 
@@ -80,14 +82,14 @@ fn main() {
                     }),
                     ..default()
                 }),
-            RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
-            //RapierDebugRenderPlugin::default(),
             TweeningPlugin,
-            level::LoaderPlugin { level },
+            level::plugin(level_select),
+            collision::plugin(),
         ))
         .add_state::<AppState>()
         .add_event::<InputEvent>()
         .add_event::<InteractionEvent>()
+        .add_event::<CacheEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
@@ -95,8 +97,7 @@ fn main() {
                 keyboard_input.before(move_player),
                 move_player.before(cap_player_velocity),
                 cap_player_velocity,
-                detect_collisions,
-                trigger_interaction.after(detect_collisions),
+                trigger_interaction,
                 die_after_fall,
             )
                 .run_if(in_state(AppState::Playing)),
@@ -114,9 +115,7 @@ fn handle(result: In<anyhow::Result<()>>) {
     }
 }
 
-fn setup(mut commands: Commands, mut rapier: ResMut<RapierConfiguration>) {
-    rapier.gravity = Vec2::ZERO;
-
+fn setup(mut commands: Commands) {
     let bounds = Vec3::new(4096.0, 2304.0, 0.0);
     let offset = Vec3::new(512.0, 512.0, 0.0); // 2-tile border for ratio safety
     let origin = bounds / 2.0 + offset;
@@ -217,80 +216,6 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
     }
 }
 
-fn detect_collisions(
-    mut input: EventReader<CollisionEvent>,
-    mut output: EventWriter<InteractionEvent>,
-    parents: Query<&Parent, With<Collider>>,
-    tiles: Query<(&Tile, &Children)>,
-    actors: Query<&Children, With<Actor>>,
-) {
-    // XXX build these structures only when the set of actors/tiles/colliders changes
-    let mut pit_colliders = HashSet::new();
-    let mut wall_colliders = HashSet::new();
-    let mut actor_colliders = HashSet::new();
-
-    for (tile, children) in tiles.iter() {
-        match tile {
-            Tile::Pit => {
-                for child in children.iter() {
-                    pit_colliders.insert(child);
-                }
-            }
-            Tile::Wall => {
-                for child in children.iter() {
-                    wall_colliders.insert(child);
-                }
-            }
-        }
-    }
-
-    for children in actors.iter() {
-        for child in children.iter() {
-            actor_colliders.insert(child);
-        }
-    }
-
-    let mut fallen_orbs = HashSet::new();
-
-    let get_parents = |e1: &Entity, e2: &Entity| -> Option<(Entity, Entity)> {
-        if let Ok(p1) = parents.get(*e1) {
-            if let Ok(p2) = parents.get(*e2) {
-                Some((p1.get(), p2.get()))
-            } else {
-                warn!("unknown parent of collider {e2:?}");
-                None
-            }
-        } else {
-            warn!("unknown parent of collider {e1:?}");
-            None
-        }
-    };
-
-    for event in input.iter() {
-        if let CollisionEvent::Started(e1, e2, _) = event {
-            if pit_colliders.contains(e1) && !fallen_orbs.contains(e2) {
-                if let Some((p1, p2)) = get_parents(e1, e2) {
-                    fallen_orbs.insert(e2);
-                    output.send(InteractionEvent::ActorEnterPit { actor: p2, pit: p1 });
-                }
-            } else if pit_colliders.contains(e2) && !fallen_orbs.contains(e1) {
-                if let Some((p1, p2)) = get_parents(e1, e2) {
-                    fallen_orbs.insert(e1);
-                    output.send(InteractionEvent::ActorEnterPit { actor: p1, pit: p2 });
-                }
-            } else if (wall_colliders.contains(e1) && actor_colliders.contains(e2))
-                || (wall_colliders.contains(e2) && actor_colliders.contains(e1))
-            {
-                output.send(InteractionEvent::ActorHitWall);
-            } else if actor_colliders.contains(e1) && actor_colliders.contains(e2) {
-                output.send(InteractionEvent::ActorHitActor);
-            } else {
-                warn!("unknown collision between {e1:?} and {e2:?}");
-            }
-        }
-    }
-}
-
 fn trigger_interaction(
     assets: Res<AssetServer>,
     mut completions: ResMut<AnimationCompletions>,
@@ -359,10 +284,11 @@ fn trigger_interaction(
 fn die_after_fall(
     mut completions: ResMut<AnimationCompletions>,
     mut commands: Commands,
-    mut events: EventReader<TweenCompleted>,
+    mut tween_events: EventReader<TweenCompleted>,
+    mut cache_events: EventWriter<CacheEvent>,
     query: Query<Entity, (With<Tile>, With<RigidBodyDisabled>)>,
 ) {
-    for fallen in events.iter() {
+    for fallen in tween_events.iter() {
         commands.entity(fallen.entity).despawn_recursive();
         if let Some(killer) = completions.killers.get(&fallen.user_data) {
             if let Ok(pit) = query.get(*killer) {
@@ -372,5 +298,6 @@ fn die_after_fall(
         } else {
             warn!("no killer registered for completion {}", fallen.user_data)
         }
+        cache_events.send(CacheEvent::InvalidateColliderHierarchy);
     }
 }
