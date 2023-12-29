@@ -1,4 +1,4 @@
-use bevy::{math::Vec3Swizzles, prelude::*, render::camera::ScalingMode, utils::HashMap};
+use bevy::{math::Vec3Swizzles, prelude::*, render::camera::ScalingMode};
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::{lens::TransformScaleLens, *};
 use std::f32::consts::PI;
@@ -26,7 +26,7 @@ enum InputEvent {
 enum InteractionEvent {
     ActorHitActor,
     ActorHitWall,
-    ActorEnterPit { actor: Entity, pit: Entity },
+    ActorEnterPit(Entity),
 }
 
 #[derive(Event)]
@@ -54,12 +54,6 @@ struct PlayerControl;
 enum EnemyControl {
     Cowardice,
     Malice,
-}
-
-#[derive(Resource)]
-struct AnimationCompletions {
-    next: u64,
-    killers: HashMap<u64, Entity>,
 }
 
 fn main() {
@@ -102,10 +96,6 @@ fn main() {
             )
                 .run_if(in_state(AppState::Playing)),
         )
-        .insert_resource(AnimationCompletions {
-            next: 0,
-            killers: HashMap::new(),
-        })
         .run();
 }
 
@@ -167,7 +157,10 @@ fn keyboard_input(input: Res<Input<KeyCode>>, mut events: EventWriter<InputEvent
 fn move_player(
     time: Res<Time>,
     mut events: EventReader<InputEvent>,
-    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<PlayerControl>>,
+    mut query: Query<
+        (&mut Transform, &mut Velocity, &mut ExternalImpulse),
+        (With<PlayerControl>, With<Actor>),
+    >,
 ) {
     for event in events.iter() {
         match *event {
@@ -218,7 +211,6 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
 
 fn trigger_interaction(
     assets: Res<AssetServer>,
-    mut completions: ResMut<AnimationCompletions>,
     mut commands: Commands,
     mut events: EventReader<InteractionEvent>,
     actors: Query<&Actor>,
@@ -237,7 +229,7 @@ fn trigger_interaction(
                     ..default()
                 });
             }
-            InteractionEvent::ActorEnterPit { actor, pit } => {
+            InteractionEvent::ActorEnterPit(actor) => {
                 if let Ok(actor) = actors.get(*actor) {
                     commands.spawn(AudioBundle {
                         source: assets.load(&actor.sfx),
@@ -246,7 +238,6 @@ fn trigger_interaction(
                 }
 
                 // shrink into oblivion
-                let animation_id = completions.next;
                 let tween = Tween::new(
                     EaseFunction::QuadraticIn,
                     Duration::from_millis(1500),
@@ -255,7 +246,7 @@ fn trigger_interaction(
                         end: Vec3::ZERO,
                     },
                 )
-                .with_completed_event(animation_id);
+                .with_completed_event(0);
 
                 commands
                     .entity(*actor)
@@ -263,41 +254,20 @@ fn trigger_interaction(
                     .insert(Animator::new(tween))
                     .despawn_descendants()
                     .with_children(|children| {
-                        children
-                            .spawn(Collider::ball(100.0))
-                            .insert(CollisionGroups::new(
-                                collision::GROUP_ONLY_ALL,
-                                collision::FILTER_WALLS,
-                            ))
-                            .insert(ColliderMassProperties::Mass(1.0))
-                            .insert(Restitution::coefficient(1.0));
+                        collision::spawn_falling_orb(children);
                     });
-
-                commands.entity(*pit).insert(RigidBodyDisabled);
-                completions.killers.insert(animation_id, *pit);
-                completions.next += 1;
             }
         }
     }
 }
 
 fn die_after_fall(
-    mut completions: ResMut<AnimationCompletions>,
     mut commands: Commands,
     mut tween_events: EventReader<TweenCompleted>,
     mut cache_events: EventWriter<CacheEvent>,
-    query: Query<Entity, (With<Tile>, With<RigidBodyDisabled>)>,
 ) {
     for fallen in tween_events.iter() {
         commands.entity(fallen.entity).despawn_recursive();
-        if let Some(killer) = completions.killers.get(&fallen.user_data) {
-            if let Ok(pit) = query.get(*killer) {
-                commands.entity(pit).remove::<RigidBodyDisabled>();
-            }
-            completions.killers.remove(&fallen.user_data);
-        } else {
-            warn!("no killer registered for completion {}", fallen.user_data)
-        }
         cache_events.send(CacheEvent::InvalidateColliderHierarchy);
     }
 }

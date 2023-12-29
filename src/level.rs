@@ -166,11 +166,6 @@ fn enable_tiles(
     }
 }
 
-struct ColliderRect {
-    origin: Vec2,
-    size: Vec2,
-}
-
 fn init_cells(
     mut commands: Commands,
     mut cells: Query<(Entity, &GridCoords, &IntGridCell), Added<IntGridCell>>,
@@ -191,7 +186,10 @@ fn init_cells(
                 batch.insert(Tile::Wall).with_children(|children| {
                     children
                         .spawn(Collider::cuboid(128.0, 128.0))
-                        .insert(CollisionGroups::new(collision::GROUP_WALL, Group::ALL))
+                        .insert(CollisionGroups::new(
+                            collision::GROUP_WALL,
+                            collision::FILTER_ALL,
+                        ))
                         .insert(Restitution::coefficient(1.0));
                 });
             }
@@ -207,7 +205,7 @@ fn init_cells(
                         data.inset_bottom() - data.inset_top(),
                     );
 
-                    let entry_box = ColliderRect {
+                    let entry_box = collision::Rect {
                         origin: offset,
                         size: Vec2::new(width, height),
                     };
@@ -215,28 +213,28 @@ fn init_cells(
                     let mut wall_boxes = Vec::new();
 
                     if data.inset_top() != 0.0 {
-                        wall_boxes.push(ColliderRect {
+                        wall_boxes.push(collision::Rect {
                             origin: Vec2::new(0.0, 256.0 - data.inset_top()),
                             size: Vec2::new(256.0, data.inset_top()),
                         });
                     }
 
                     if data.inset_right() != 0.0 {
-                        wall_boxes.push(ColliderRect {
+                        wall_boxes.push(collision::Rect {
                             origin: Vec2::new(256.0 - data.inset_right(), 0.0),
                             size: Vec2::new(data.inset_right(), 256.0),
                         });
                     }
 
                     if data.inset_bottom() != 0.0 {
-                        wall_boxes.push(ColliderRect {
+                        wall_boxes.push(collision::Rect {
                             origin: Vec2::new(0.0, -128.0 - data.inset_bottom()),
                             size: Vec2::new(256.0, data.inset_bottom()),
                         });
                     }
 
                     if data.inset_left() != 0.0 {
-                        wall_boxes.push(ColliderRect {
+                        wall_boxes.push(collision::Rect {
                             origin: Vec2::new(-128.0 - data.inset_left(), 0.0),
                             size: Vec2::new(data.inset_left(), 256.0),
                         });
@@ -245,35 +243,18 @@ fn init_cells(
                     (entry_box, wall_boxes)
                 } else {
                     (
-                        ColliderRect {
+                        collision::Rect {
                             origin: Vec2::ZERO,
                             size: Vec2::new(256.0, 256.0),
                         },
-                        Vec::<ColliderRect>::new(),
+                        Vec::<collision::Rect>::new(),
                     )
                 };
 
                 batch.insert(Tile::Pit).with_children(|children| {
-                    children
-                        .spawn(SpatialBundle::from_transform(Transform::from_xyz(
-                            entry.origin.x / 2.0,
-                            entry.origin.y / 2.0,
-                            0.0,
-                        )))
-                        .insert(Collider::cuboid(entry.size.x / 2.0, entry.size.y / 2.0))
-                        .insert(CollisionGroups::new(collision::GROUP_PIT, Group::ALL))
-                        .insert(Sensor);
-
-                    for wall in walls {
-                        children
-                            .spawn(SpatialBundle::from_transform(Transform::from_xyz(
-                                wall.origin.x / 2.0,
-                                wall.origin.y / 2.0,
-                                0.0,
-                            )))
-                            .insert(Collider::cuboid(wall.size.x / 2.0, wall.size.y / 2.0))
-                            .insert(CollisionGroups::new(collision::GROUP_PIT_WALL, Group::ALL))
-                            .insert(Restitution::coefficient(1.0));
+                    collision::spawn_pit(children, &entry);
+                    for wall in &walls {
+                        collision::spawn_pit_wall(children, &wall);
                     }
                 });
             }
