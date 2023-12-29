@@ -1,5 +1,5 @@
 use bevy::prelude::*;
-use bevy::utils::HashSet;
+use bevy::utils::{HashMap, HashSet};
 use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
@@ -9,8 +9,6 @@ use std::f32::consts::PI;
 use std::time::Duration;
 
 mod loader;
-
-const ANIMATION_FALL: u64 = 0;
 
 const COLLISION_MAIN: Group = Group::GROUP_1;
 const COLLISION_PIT_ENTRY: Group = Group::GROUP_2;
@@ -28,7 +26,7 @@ enum AppState {
 enum InteractionEvent {
     ActorHitActor,
     ActorHitWall,
-    ActorEnterPit(Entity),
+    ActorEnterPit { actor: Entity, pit: Entity },
 }
 
 /// Has interactions on contact
@@ -49,6 +47,12 @@ struct Player;
 /// Marks npc, who can be defeated
 #[derive(Default, Component)]
 struct Enemy;
+
+#[derive(Resource)]
+struct AnimationCompletions {
+    next: u64,
+    killers: HashMap<u64, Entity>,
+}
 
 fn main() {
     App::new()
@@ -83,6 +87,10 @@ fn main() {
             )
                 .run_if(in_state(AppState::Playing)),
         )
+        .insert_resource(AnimationCompletions {
+            next: 0,
+            killers: HashMap::new(),
+        })
         .run();
 }
 
@@ -219,17 +227,31 @@ fn detect_collisions(
 
     let mut fallen_orbs = HashSet::new();
 
+    let get_parents = |e1: &Entity, e2: &Entity| -> Option<(Entity, Entity)> {
+        if let Ok(p1) = parents.get(*e1) {
+            if let Ok(p2) = parents.get(*e2) {
+                Some((p1.get(), p2.get()))
+            } else {
+                warn!("unknown parent of collider {e2:?}");
+                None
+            }
+        } else {
+            warn!("unknown parent of collider {e1:?}");
+            None
+        }
+    };
+
     for event in input.iter() {
         if let CollisionEvent::Started(e1, e2, _) = event {
             if pit_colliders.contains(e1) && !fallen_orbs.contains(e2) {
-                if let Ok(parent) = parents.get(*e2) {
+                if let Some((p1, p2)) = get_parents(e1, e2) {
                     fallen_orbs.insert(e2);
-                    output.send(InteractionEvent::ActorEnterPit(parent.get()));
+                    output.send(InteractionEvent::ActorEnterPit { actor: p2, pit: p1 });
                 }
             } else if pit_colliders.contains(e2) && !fallen_orbs.contains(e1) {
-                if let Ok(parent) = parents.get(*e1) {
+                if let Some((p1, p2)) = get_parents(e1, e2) {
                     fallen_orbs.insert(e1);
-                    output.send(InteractionEvent::ActorEnterPit(parent.get()));
+                    output.send(InteractionEvent::ActorEnterPit { actor: p1, pit: p2 });
                 }
             } else if (wall_colliders.contains(e1) && actor_colliders.contains(e2))
                 || (wall_colliders.contains(e2) && actor_colliders.contains(e1))
@@ -246,6 +268,7 @@ fn detect_collisions(
 
 fn trigger_interaction(
     assets: Res<AssetServer>,
+    mut completions: ResMut<AnimationCompletions>,
     mut commands: Commands,
     mut events: EventReader<InteractionEvent>,
     players: Query<Entity, With<Player>>,
@@ -264,10 +287,10 @@ fn trigger_interaction(
                     ..default()
                 });
             }
-            InteractionEvent::ActorEnterPit(entity) => {
+            InteractionEvent::ActorEnterPit { actor, pit } => {
                 let all_players = HashSet::from_iter(players.iter());
                 commands.spawn(AudioBundle {
-                    source: assets.load(if all_players.contains(entity) {
+                    source: assets.load(if all_players.contains(actor) {
                         "player-fall.ogg"
                     } else {
                         "enemy-fall.ogg"
@@ -276,6 +299,7 @@ fn trigger_interaction(
                 });
 
                 // shrink into oblivion
+                let animation_id = completions.next;
                 let tween = Tween::new(
                     EaseFunction::QuadraticIn,
                     Duration::from_millis(1500),
@@ -284,12 +308,12 @@ fn trigger_interaction(
                         end: Vec3::ZERO,
                     },
                 )
-                .with_completed_event(ANIMATION_FALL);
+                .with_completed_event(animation_id);
 
                 commands
-                    .entity(*entity)
-                    .insert(Animator::new(tween))
+                    .entity(*actor)
                     .remove::<Actor>()
+                    .insert(Animator::new(tween))
                     .despawn_descendants()
                     .with_children(|children| {
                         children
@@ -301,14 +325,31 @@ fn trigger_interaction(
                             .insert(ColliderMassProperties::Mass(1.0))
                             .insert(Restitution::coefficient(1.0));
                     });
+
+                commands.entity(*pit).insert(RigidBodyDisabled);
+                completions.killers.insert(animation_id, *pit);
+                completions.next += 1;
             }
         }
     }
 }
 
-fn die_after_fall(mut commands: Commands, mut events: EventReader<TweenCompleted>) {
+fn die_after_fall(
+    mut completions: ResMut<AnimationCompletions>,
+    mut commands: Commands,
+    mut events: EventReader<TweenCompleted>,
+    query: Query<Entity, (With<Tile>, With<RigidBodyDisabled>)>,
+) {
     for fallen in events.iter() {
         commands.entity(fallen.entity).despawn_recursive();
+        if let Some(killer) = completions.killers.get(&fallen.user_data) {
+            if let Ok(pit) = query.get(*killer) {
+                commands.entity(pit).remove::<RigidBodyDisabled>();
+            }
+            completions.killers.remove(&fallen.user_data);
+        } else {
+            warn!("no killer registered for completion {}", fallen.user_data)
+        }
     }
 }
 
