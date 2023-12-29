@@ -1,6 +1,4 @@
-use crate::{COLLISION_MAIN, COLLISION_PIT_ENTRY, COLLISION_PIT_WALLS};
-
-use super::{AppState, Tile};
+use crate::{collision, Actor, AppState, EnemyControl, PlayerControl, Tile};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
@@ -35,19 +33,72 @@ impl CustomData {
 
 #[derive(Bundle, LdtkEntity)]
 struct PlayerBundle {
-    orb: super::Actor,
-    player: super::Player,
+    #[with(player_actor)]
+    actor: Actor,
+    player: Player,
+    control: PlayerControl,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
 }
 
 #[derive(Bundle, LdtkEntity)]
-struct EnemyBundle {
-    orb: super::Actor,
-    enemy: super::Enemy,
+struct DResBundle {
+    enemy: Enemy,
+    #[with(enemy_actor)]
+    actor: Actor,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
 }
+
+#[derive(Bundle, LdtkEntity)]
+struct DCowBundle {
+    enemy: Enemy,
+    #[with(dcow_control)]
+    control: EnemyControl,
+    #[with(enemy_actor)]
+    actor: Actor,
+    #[sprite_sheet_bundle]
+    sprite_bundle: SpriteSheetBundle,
+}
+
+#[derive(Bundle, LdtkEntity)]
+struct DMalBundle {
+    enemy: Enemy,
+    #[with(dmal_control)]
+    control: EnemyControl,
+    #[with(enemy_actor)]
+    actor: Actor,
+    #[sprite_sheet_bundle]
+    sprite_bundle: SpriteSheetBundle,
+}
+
+fn player_actor(_: &EntityInstance) -> Actor {
+    Actor {
+        sfx: "player-fall.ogg".into(),
+    }
+}
+
+fn enemy_actor(_: &EntityInstance) -> Actor {
+    Actor {
+        sfx: "player-fall.ogg".into(),
+    }
+}
+
+fn dcow_control(_: &EntityInstance) -> EnemyControl {
+    EnemyControl::Cowardice
+}
+
+fn dmal_control(_: &EntityInstance) -> EnemyControl {
+    EnemyControl::Malice
+}
+
+/// Marks pc, who must remain alive
+#[derive(Default, Component)]
+struct Player;
+
+/// Marks npc, who can be defeated
+#[derive(Default, Component)]
+struct Enemy;
 
 #[derive(Default, Component)]
 struct LoadingScreenElement;
@@ -57,8 +108,6 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         ldtk_handle: asset_server.load("levels.ldtk"),
         ..default()
     });
-
-    commands.insert_resource(LevelSelection::Index(0));
 
     commands
         .spawn(TextBundle {
@@ -142,7 +191,7 @@ fn init_cells(
                 batch.insert(Tile::Wall).with_children(|children| {
                     children
                         .spawn(Collider::cuboid(128.0, 128.0))
-                        .insert(CollisionGroups::new(COLLISION_MAIN, Group::ALL))
+                        .insert(CollisionGroups::new(collision::GROUP_WALL, Group::ALL))
                         .insert(Restitution::coefficient(1.0));
                 });
             }
@@ -212,7 +261,7 @@ fn init_cells(
                             0.0,
                         )))
                         .insert(Collider::cuboid(entry.size.x / 2.0, entry.size.y / 2.0))
-                        .insert(CollisionGroups::new(COLLISION_PIT_ENTRY, Group::ALL))
+                        .insert(CollisionGroups::new(collision::GROUP_PIT, Group::ALL))
                         .insert(Sensor);
 
                     for wall in walls {
@@ -223,7 +272,7 @@ fn init_cells(
                                 0.0,
                             )))
                             .insert(Collider::cuboid(wall.size.x / 2.0, wall.size.y / 2.0))
-                            .insert(CollisionGroups::new(COLLISION_PIT_WALLS, Group::ALL))
+                            .insert(CollisionGroups::new(collision::GROUP_PIT_WALL, Group::ALL))
                             .insert(Restitution::coefficient(1.0));
                     }
                 });
@@ -244,7 +293,10 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Act
             .with_children(|children| {
                 children
                     .spawn(Collider::ball(100.0))
-                    .insert(CollisionGroups::new(COLLISION_MAIN, COLLISION_MAIN))
+                    .insert(CollisionGroups::new(
+                        collision::GROUP_ACTOR,
+                        collision::FILTER_MAIN,
+                    ))
                     .insert(ColliderMassProperties::Mass(1.0))
                     .insert(Restitution::coefficient(1.0))
                     .insert(ActiveEvents::COLLISION_EVENTS);
@@ -252,8 +304,8 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Act
                 children
                     .spawn(Collider::ball(0.0))
                     .insert(CollisionGroups::new(
-                        COLLISION_PIT_ENTRY,
-                        COLLISION_PIT_ENTRY,
+                        collision::GROUP_ONLY_ALL,
+                        collision::FILTER_PITS,
                     ))
                     .insert(ColliderMassProperties::Mass(1.0))
                     .insert(Restitution::coefficient(1.0))
@@ -262,7 +314,35 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Act
     }
 }
 
-pub struct LoaderPlugin;
+fn respawn_after_death(
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
+    level: Query<Entity, With<Handle<LdtkLevel>>>,
+    players: Query<&Player>,
+) {
+    if players.is_empty() {
+        commands.entity(level.single()).insert(Respawn);
+        next_state.set(AppState::Loading);
+    }
+}
+
+fn advance_after_victory(
+    mut commands: Commands,
+    mut next_state: ResMut<NextState<AppState>>,
+    level: Res<LevelSelection>,
+    enemies: Query<&Enemy>,
+) {
+    if enemies.is_empty() {
+        if let LevelSelection::Index(i) = level.into_inner() {
+            commands.insert_resource(LevelSelection::Index(1 - i));
+            next_state.set(AppState::Loading);
+        }
+    }
+}
+
+pub struct LoaderPlugin {
+    pub level: usize,
+}
 
 impl Plugin for LoaderPlugin {
     fn build(&self, app: &mut App) {
@@ -270,12 +350,19 @@ impl Plugin for LoaderPlugin {
             .add_systems(Startup, setup)
             .add_systems(
                 Update,
-                (init_cells.pipe(super::handle), init_entity, detect_loaded)
-                    .run_if(in_state(AppState::Loading)),
+                (
+                    (init_cells.pipe(super::handle), init_entity, detect_loaded)
+                        .run_if(in_state(AppState::Loading)),
+                    (respawn_after_death, advance_after_victory)
+                        .run_if(in_state(AppState::Playing)),
+                ),
             )
             .add_systems(OnEnter(AppState::Loading), enable_tiles(false))
             .add_systems(OnEnter(AppState::Playing), enable_tiles(true))
+            .insert_resource(LevelSelection::Index(self.level))
             .register_ldtk_entity::<PlayerBundle>("player")
-            .register_ldtk_entity::<EnemyBundle>("enemy");
+            .register_ldtk_entity::<DResBundle>("d_resignation")
+            .register_ldtk_entity::<DCowBundle>("d_cowardice")
+            .register_ldtk_entity::<DMalBundle>("d_malice");
     }
 }

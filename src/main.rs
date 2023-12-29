@@ -1,24 +1,27 @@
 use bevy::prelude::*;
 use bevy::utils::{HashMap, HashSet};
 use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
-use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::lens::TransformScaleLens;
 use bevy_tweening::*;
 use std::f32::consts::PI;
 use std::time::Duration;
 
-mod loader;
-
-const COLLISION_MAIN: Group = Group::GROUP_1;
-const COLLISION_PIT_ENTRY: Group = Group::GROUP_2;
-const COLLISION_PIT_WALLS: Group = Group::GROUP_3;
+mod collision;
+mod level;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
     #[default]
     Loading,
     Playing,
+}
+
+/// Player button presses
+#[derive(Event)]
+enum InputEvent {
+    Decelerate,
+    Accelerate(Vec2),
 }
 
 /// Interactions detected by physics
@@ -37,16 +40,19 @@ enum Tile {
 }
 
 /// Moves around the level, interacting with other actors and with tiles
-#[derive(Default, Component)]
-struct Actor;
+#[derive(Component)]
+struct Actor {
+    sfx: String,
+}
 
-/// Marks pc, who must remain alive
-#[derive(Default, Component)]
-struct Player;
+#[derive(Component, Default)]
+struct PlayerControl;
 
-/// Marks npc, who can be defeated
-#[derive(Default, Component)]
-struct Enemy;
+#[derive(Component)]
+enum EnemyControl {
+    Cowardice,
+    Malice,
+}
 
 #[derive(Resource)]
 struct AnimationCompletions {
@@ -55,6 +61,14 @@ struct AnimationCompletions {
 }
 
 fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut level = 0;
+    if let Some(arg) = args.get(1) {
+        if let Ok(index) = arg.parse() {
+            level = index;
+        }
+    }
+
     App::new()
         .add_plugins((
             DefaultPlugins
@@ -69,21 +83,21 @@ fn main() {
             RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0),
             //RapierDebugRenderPlugin::default(),
             TweeningPlugin,
-            loader::LoaderPlugin,
+            level::LoaderPlugin { level },
         ))
         .add_state::<AppState>()
+        .add_event::<InputEvent>()
         .add_event::<InteractionEvent>()
         .add_systems(Startup, setup)
         .add_systems(
             Update,
             (
-                move_player,
+                keyboard_input.before(move_player),
+                move_player.before(cap_player_velocity),
                 cap_player_velocity,
                 detect_collisions,
                 trigger_interaction.after(detect_collisions),
                 die_after_fall,
-                respawn_after_death,
-                advance_after_victory,
             )
                 .run_if(in_state(AppState::Playing)),
         )
@@ -119,22 +133,14 @@ fn setup(mut commands: Commands, mut rapier: ResMut<RapierConfiguration>) {
     });
 }
 
-fn move_player(
-    time: Res<Time>,
-    input: Res<Input<KeyCode>>,
-    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<Player>>,
-) {
-    // braking overrides acceleration
+fn keyboard_input(input: Res<Input<KeyCode>>, mut events: EventWriter<InputEvent>) {
+    // braking takes priority
     if input.pressed(KeyCode::Space) {
-        for (_, velocity, mut impulse) in query.iter_mut() {
-            let antithrust = velocity.linvel.normalize();
-            impulse.impulse = (antithrust * -1500.0 * time.delta_seconds())
-                .clamp_length(0.0, velocity.linvel.length());
-        }
-
+        events.send(InputEvent::Decelerate);
         return;
     }
 
+    // if not braking, we may thrust
     let mut thrust = Vec2::ZERO;
 
     if input.pressed(KeyCode::Right) {
@@ -153,40 +159,59 @@ fn move_player(
         thrust.y -= 1.0;
     }
 
-    if thrust == Vec2::ZERO {
-        return;
-    } else {
+    if thrust != Vec2::ZERO {
         thrust = thrust.normalize();
+        events.send(InputEvent::Accelerate(thrust));
     }
+}
 
-    for (mut transform, mut velocity, mut impulse) in query.iter_mut() {
-        let forward = (transform.rotation * Vec3::Y).xy();
-        let forward_dot_goal = forward.dot(thrust);
+fn move_player(
+    time: Res<Time>,
+    mut events: EventReader<InputEvent>,
+    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<PlayerControl>>,
+) {
+    for event in events.iter() {
+        match *event {
+            InputEvent::Decelerate => {
+                for (_, velocity, mut impulse) in query.iter_mut() {
+                    let antithrust = velocity.linvel.normalize();
+                    impulse.impulse = (antithrust * -1500.0 * time.delta_seconds())
+                        .clamp_length(0.0, velocity.linvel.length());
+                }
+            }
+            InputEvent::Accelerate(thrust) => {
+                for (mut transform, mut velocity, mut impulse) in query.iter_mut() {
+                    let forward = (transform.rotation * Vec3::Y).xy();
+                    let forward_dot_goal = forward.dot(thrust);
 
-        // if facing ⋅ thrust is significant, rotate towards thrust
-        if (forward_dot_goal - 1.0).abs() >= f32::EPSILON {
-            // cancel any tumbling
-            velocity.angvel = 0.0;
+                    // if facing ⋅ thrust is significant, rotate towards thrust
+                    if (forward_dot_goal - 1.0).abs() >= f32::EPSILON {
+                        // cancel any tumbling
+                        velocity.angvel = 0.0;
 
-            // +ve=anticlockwise, -ve=clockwise (right hand rule)
-            let right = (transform.rotation * Vec3::X).xy();
-            let right_dot_goal = right.dot(thrust);
-            let sign = -f32::copysign(1.0, right_dot_goal);
+                        // +ve=anticlockwise, -ve=clockwise (right hand rule)
+                        let right = (transform.rotation * Vec3::X).xy();
+                        let right_dot_goal = right.dot(thrust);
+                        let sign = -f32::copysign(1.0, right_dot_goal);
 
-            // avoid overshoot
-            let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
-            let rotation_angle = (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
+                        // avoid overshoot
+                        let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
+                        let rotation_angle =
+                            (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
 
-            transform.rotate_z(rotation_angle);
-        }
-        // otherwise, apply thrust in the direction we are now facing
-        else {
-            impulse.impulse = thrust * 750.0 * time.delta_seconds();
+                        transform.rotate_z(rotation_angle);
+                    }
+                    // otherwise, apply thrust in the direction we are now facing
+                    else {
+                        impulse.impulse = thrust * 750.0 * time.delta_seconds();
+                    }
+                }
+            }
         }
     }
 }
 
-fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
+fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
     for mut velocity in query.iter_mut() {
         velocity.linvel = velocity.linvel.clamp_length_max(3000.0);
     }
@@ -271,7 +296,7 @@ fn trigger_interaction(
     mut completions: ResMut<AnimationCompletions>,
     mut commands: Commands,
     mut events: EventReader<InteractionEvent>,
-    players: Query<Entity, With<Player>>,
+    actors: Query<&Actor>,
 ) {
     for event in events.iter() {
         match event {
@@ -288,15 +313,12 @@ fn trigger_interaction(
                 });
             }
             InteractionEvent::ActorEnterPit { actor, pit } => {
-                let all_players = HashSet::from_iter(players.iter());
-                commands.spawn(AudioBundle {
-                    source: assets.load(if all_players.contains(actor) {
-                        "player-fall.ogg"
-                    } else {
-                        "enemy-fall.ogg"
-                    }),
-                    ..default()
-                });
+                if let Ok(actor) = actors.get(*actor) {
+                    commands.spawn(AudioBundle {
+                        source: assets.load(&actor.sfx),
+                        ..default()
+                    });
+                }
 
                 // shrink into oblivion
                 let animation_id = completions.next;
@@ -319,8 +341,8 @@ fn trigger_interaction(
                         children
                             .spawn(Collider::ball(100.0))
                             .insert(CollisionGroups::new(
-                                COLLISION_PIT_WALLS,
-                                COLLISION_PIT_WALLS,
+                                collision::GROUP_ONLY_ALL,
+                                collision::FILTER_WALLS,
                             ))
                             .insert(ColliderMassProperties::Mass(1.0))
                             .insert(Restitution::coefficient(1.0));
@@ -349,32 +371,6 @@ fn die_after_fall(
             completions.killers.remove(&fallen.user_data);
         } else {
             warn!("no killer registered for completion {}", fallen.user_data)
-        }
-    }
-}
-
-fn respawn_after_death(
-    mut commands: Commands,
-    mut next_state: ResMut<NextState<AppState>>,
-    level: Query<Entity, With<Handle<LdtkLevel>>>,
-    players: Query<&Player>,
-) {
-    if players.is_empty() {
-        commands.entity(level.single()).insert(Respawn);
-        next_state.set(AppState::Loading);
-    }
-}
-
-fn advance_after_victory(
-    mut commands: Commands,
-    mut next_state: ResMut<NextState<AppState>>,
-    level: Res<LevelSelection>,
-    enemies: Query<&Enemy>,
-) {
-    if enemies.is_empty() {
-        if let LevelSelection::Index(i) = level.into_inner() {
-            commands.insert_resource(LevelSelection::Index(1 - i));
-            next_state.set(AppState::Loading);
         }
     }
 }
