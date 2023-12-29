@@ -12,6 +12,10 @@ mod loader;
 
 const ANIMATION_FALL: u64 = 0;
 
+const COLLISION_MAIN: Group = Group::GROUP_1;
+const COLLISION_PIT_ENTRY: Group = Group::GROUP_2;
+const COLLISION_PIT_WALLS: Group = Group::GROUP_3;
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
     #[default]
@@ -172,19 +176,33 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<Player>>) {
 fn detect_collisions(
     mut input: EventReader<CollisionEvent>,
     mut output: EventWriter<InteractionEvent>,
-    query: Query<(Entity, &Tile)>,
+    parents: Query<&Parent, With<Collider>>,
+    tiles: Query<(&Tile, &Children)>,
+    actors: Query<&Children, With<Actor>>,
 ) {
-    let mut pit_entities = HashSet::new();
-    let mut wall_entities = HashSet::new();
+    // XXX build these structures only when the set of actors/tiles/colliders changes
+    let mut pit_colliders = HashSet::new();
+    let mut wall_colliders = HashSet::new();
+    let mut actor_colliders = HashSet::new();
 
-    for (entity, tile) in query.iter() {
+    for (tile, children) in tiles.iter() {
         match tile {
             Tile::Pit => {
-                pit_entities.insert(entity);
+                for child in children.iter() {
+                    pit_colliders.insert(child);
+                }
             }
             Tile::Wall => {
-                wall_entities.insert(entity);
+                for child in children.iter() {
+                    wall_colliders.insert(child);
+                }
             }
+        }
+    }
+
+    for children in actors.iter() {
+        for child in children.iter() {
+            actor_colliders.insert(child);
         }
     }
 
@@ -192,16 +210,24 @@ fn detect_collisions(
 
     for event in input.iter() {
         if let CollisionEvent::Started(e1, e2, _) = event {
-            if pit_entities.contains(e1) && !fallen_orbs.contains(e2) {
-                fallen_orbs.insert(e2);
-                output.send(InteractionEvent::ActorEnterPit(*e2));
-            } else if pit_entities.contains(e2) && !fallen_orbs.contains(e1) {
-                fallen_orbs.insert(e1);
-                output.send(InteractionEvent::ActorEnterPit(*e1));
-            } else if wall_entities.contains(e1) || wall_entities.contains(e2) {
+            if pit_colliders.contains(e1) && !fallen_orbs.contains(e2) {
+                if let Ok(parent) = parents.get(*e2) {
+                    fallen_orbs.insert(e2);
+                    output.send(InteractionEvent::ActorEnterPit(parent.get()));
+                }
+            } else if pit_colliders.contains(e2) && !fallen_orbs.contains(e1) {
+                if let Ok(parent) = parents.get(*e1) {
+                    fallen_orbs.insert(e1);
+                    output.send(InteractionEvent::ActorEnterPit(parent.get()));
+                }
+            } else if (wall_colliders.contains(e1) && actor_colliders.contains(e2))
+                || (wall_colliders.contains(e2) && actor_colliders.contains(e1))
+            {
                 output.send(InteractionEvent::ActorHitWall);
-            } else {
+            } else if actor_colliders.contains(e1) && actor_colliders.contains(e2) {
                 output.send(InteractionEvent::ActorHitActor);
+            } else {
+                warn!("unknown collision between {e1:?} and {e2:?}");
             }
         }
     }
@@ -241,7 +267,7 @@ fn trigger_interaction(
                 // shrink into oblivion
                 let tween = Tween::new(
                     EaseFunction::QuadraticIn,
-                    Duration::from_secs(1),
+                    Duration::from_millis(1500),
                     TransformScaleLens {
                         start: Vec3::ONE,
                         end: Vec3::ZERO,
@@ -251,9 +277,19 @@ fn trigger_interaction(
 
                 commands
                     .entity(*entity)
+                    .insert(Animator::new(tween))
                     .remove::<Actor>()
-                    .remove::<Collider>()
-                    .insert(Animator::new(tween));
+                    .despawn_descendants()
+                    .with_children(|children| {
+                        children
+                            .spawn(Collider::ball(100.0))
+                            .insert(CollisionGroups::new(
+                                COLLISION_PIT_WALLS,
+                                COLLISION_PIT_WALLS,
+                            ))
+                            .insert(ColliderMassProperties::Mass(1.0))
+                            .insert(Restitution::coefficient(1.0));
+                    });
             }
         }
     }
@@ -261,7 +297,7 @@ fn trigger_interaction(
 
 fn die_after_fall(mut commands: Commands, mut events: EventReader<TweenCompleted>) {
     for fallen in events.iter() {
-        commands.entity(fallen.entity).despawn();
+        commands.entity(fallen.entity).despawn_recursive();
     }
 }
 

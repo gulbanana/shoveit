@@ -1,3 +1,5 @@
+use crate::{COLLISION_MAIN, COLLISION_PIT_ENTRY, COLLISION_PIT_WALLS};
+
 use super::{AppState, Tile};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
@@ -115,9 +117,14 @@ fn enable_tiles(
     }
 }
 
+struct ColliderRect {
+    origin: Vec2,
+    size: Vec2,
+}
+
 fn init_cells(
     mut commands: Commands,
-    mut cells: Query<(Entity, &GridCoords, &IntGridCell, &mut Transform), Added<IntGridCell>>,
+    mut cells: Query<(Entity, &GridCoords, &IntGridCell), Added<IntGridCell>>,
     tiles: Query<(&GridCoords, &TileMetadata)>,
 ) -> anyhow::Result<()> {
     let mut metadata_by_coords = HashMap::new();
@@ -126,35 +133,100 @@ fn init_cells(
         metadata_by_coords.insert(*coords, &metadata.data);
     }
 
-    for (entity, coords, cell, mut transform) in cells.iter_mut() {
+    for (entity, coords, cell) in cells.iter_mut() {
         let mut batch = commands.entity(entity);
+        batch.insert(RigidBody::Fixed);
+
         match cell.value {
             WALL_TILE => {
-                batch
-                    .insert(Tile::Wall)
-                    .insert(Collider::cuboid(128.0, 128.0))
-                    .insert(Restitution::coefficient(1.0));
+                batch.insert(Tile::Wall).with_children(|children| {
+                    children
+                        .spawn(Collider::cuboid(128.0, 128.0))
+                        .insert(CollisionGroups::new(COLLISION_MAIN, Group::ALL))
+                        .insert(Restitution::coefficient(1.0));
+                });
             }
             PIT_TILE => {
-                batch.insert(Tile::Pit).insert(Sensor);
-
-                if let Some(metadata) = metadata_by_coords.get(coords) {
+                let (entry, walls) = if let Some(metadata) = metadata_by_coords.get(coords) {
                     let data: CustomData =
                         serde_json::from_str(metadata).context("deserialise CustomData")?;
 
                     let width = 256.0 - data.inset_left() - data.inset_right();
                     let height = 256.0 - data.inset_top() - data.inset_bottom();
-                    let offset = Vec3::new(
+                    let offset = Vec2::new(
                         data.inset_left() - data.inset_right(),
                         data.inset_bottom() - data.inset_top(),
-                        0.0,
                     );
 
-                    transform.translation += offset / 2.0;
-                    batch.insert(Collider::cuboid(width / 2.0, height / 2.0));
+                    let entry_box = ColliderRect {
+                        origin: offset,
+                        size: Vec2::new(width, height),
+                    };
+
+                    let mut wall_boxes = Vec::new();
+
+                    if data.inset_top() != 0.0 {
+                        wall_boxes.push(ColliderRect {
+                            origin: Vec2::new(0.0, 256.0 - data.inset_top()),
+                            size: Vec2::new(256.0, data.inset_top()),
+                        });
+                    }
+
+                    if data.inset_right() != 0.0 {
+                        wall_boxes.push(ColliderRect {
+                            origin: Vec2::new(256.0 - data.inset_right(), 0.0),
+                            size: Vec2::new(data.inset_right(), 256.0),
+                        });
+                    }
+
+                    if data.inset_bottom() != 0.0 {
+                        wall_boxes.push(ColliderRect {
+                            origin: Vec2::new(0.0, -128.0 - data.inset_bottom()),
+                            size: Vec2::new(256.0, data.inset_bottom()),
+                        });
+                    }
+
+                    if data.inset_left() != 0.0 {
+                        wall_boxes.push(ColliderRect {
+                            origin: Vec2::new(-128.0 - data.inset_left(), 0.0),
+                            size: Vec2::new(data.inset_left(), 256.0),
+                        });
+                    }
+
+                    (entry_box, wall_boxes)
                 } else {
-                    batch.insert(Collider::cuboid(128.0, 128.0));
-                }
+                    (
+                        ColliderRect {
+                            origin: Vec2::ZERO,
+                            size: Vec2::new(256.0, 256.0),
+                        },
+                        Vec::<ColliderRect>::new(),
+                    )
+                };
+
+                batch.insert(Tile::Pit).with_children(|children| {
+                    children
+                        .spawn(SpatialBundle::from_transform(Transform::from_xyz(
+                            entry.origin.x / 2.0,
+                            entry.origin.y / 2.0,
+                            0.0,
+                        )))
+                        .insert(Collider::cuboid(entry.size.x / 2.0, entry.size.y / 2.0))
+                        .insert(CollisionGroups::new(COLLISION_PIT_ENTRY, Group::ALL))
+                        .insert(Sensor);
+
+                    for wall in walls {
+                        children
+                            .spawn(SpatialBundle::from_transform(Transform::from_xyz(
+                                wall.origin.x / 2.0,
+                                wall.origin.y / 2.0,
+                                0.0,
+                            )))
+                            .insert(Collider::cuboid(wall.size.x / 2.0, wall.size.y / 2.0))
+                            .insert(CollisionGroups::new(COLLISION_PIT_WALLS, Group::ALL))
+                            .insert(Restitution::coefficient(1.0));
+                    }
+                });
             }
             _ => (),
         }
@@ -169,10 +241,24 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Act
             .insert(RigidBody::Dynamic)
             .insert(Velocity::default())
             .insert(ExternalImpulse::default())
-            .insert(Collider::ball(100.0))
-            .insert(ColliderMassProperties::Mass(1.0))
-            .insert(Restitution::coefficient(1.0))
-            .insert(ActiveEvents::COLLISION_EVENTS);
+            .with_children(|children| {
+                children
+                    .spawn(Collider::ball(100.0))
+                    .insert(CollisionGroups::new(COLLISION_MAIN, COLLISION_MAIN))
+                    .insert(ColliderMassProperties::Mass(1.0))
+                    .insert(Restitution::coefficient(1.0))
+                    .insert(ActiveEvents::COLLISION_EVENTS);
+
+                children
+                    .spawn(Collider::ball(0.0))
+                    .insert(CollisionGroups::new(
+                        COLLISION_PIT_ENTRY,
+                        COLLISION_PIT_ENTRY,
+                    ))
+                    .insert(ColliderMassProperties::Mass(1.0))
+                    .insert(Restitution::coefficient(1.0))
+                    .insert(ActiveEvents::COLLISION_EVENTS);
+            });
     }
 }
 
