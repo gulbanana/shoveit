@@ -113,9 +113,20 @@ fn setup(mut commands: Commands, mut rapier: ResMut<RapierConfiguration>) {
 
 fn move_player(
     time: Res<Time>,
-    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<Player>>,
     input: Res<Input<KeyCode>>,
+    mut query: Query<(&mut Transform, &mut Velocity, &mut ExternalImpulse), With<Player>>,
 ) {
+    // braking overrides acceleration
+    if input.pressed(KeyCode::Space) {
+        for (_, velocity, mut impulse) in query.iter_mut() {
+            let antithrust = velocity.linvel.normalize();
+            impulse.impulse = (antithrust * -1500.0 * time.delta_seconds())
+                .clamp_length(0.0, velocity.linvel.length());
+        }
+
+        return;
+    }
+
     let mut thrust = Vec2::ZERO;
 
     if input.pressed(KeyCode::Right) {
