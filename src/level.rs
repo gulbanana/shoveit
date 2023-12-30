@@ -2,6 +2,7 @@ use crate::{collision, Actor, AppState, CacheEvent, EnemyControl, PlayerControl,
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
+use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use serde::Deserialize;
 
@@ -31,76 +32,39 @@ impl CustomData {
     }
 }
 
+/// Blueprint bundle with extracted data and sprite
 #[derive(Bundle, LdtkEntity)]
-struct PlayerBundle {
-    #[with(player_actor)]
-    actor: Actor,
-    player: Player,
-    control: PlayerControl,
+struct LdtkEntityBundle {
+    #[with(Ldtk::new)]
+    ldtk: Ldtk,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
 }
 
-#[derive(Bundle, LdtkEntity)]
-struct DResBundle {
-    enemy: Enemy,
-    #[with(enemy_actor)]
-    actor: Actor,
-    #[sprite_sheet_bundle]
-    sprite_bundle: SpriteSheetBundle,
+///  Contains data from LDTK entities for blueprinting
+#[derive(Component)]
+struct Ldtk {
+    identifier: String,
 }
 
-#[derive(Bundle, LdtkEntity)]
-struct DCowBundle {
-    enemy: Enemy,
-    #[with(dcow_control)]
-    control: EnemyControl,
-    #[with(enemy_actor)]
-    actor: Actor,
-    #[sprite_sheet_bundle]
-    sprite_bundle: SpriteSheetBundle,
-}
-
-#[derive(Bundle, LdtkEntity)]
-struct DMalBundle {
-    enemy: Enemy,
-    #[with(dmal_control)]
-    control: EnemyControl,
-    #[with(enemy_actor)]
-    actor: Actor,
-    #[sprite_sheet_bundle]
-    sprite_bundle: SpriteSheetBundle,
-}
-
-fn player_actor(_: &EntityInstance) -> Actor {
-    Actor {
-        sfx: "player-fall.ogg".into(),
+impl Ldtk {
+    fn new(instance: &EntityInstance) -> Ldtk {
+        Ldtk {
+            identifier: instance.identifier.clone(),
+        }
     }
-}
-
-fn enemy_actor(_: &EntityInstance) -> Actor {
-    Actor {
-        sfx: "player-fall.ogg".into(),
-    }
-}
-
-fn dcow_control(_: &EntityInstance) -> EnemyControl {
-    EnemyControl::Cowardice
-}
-
-fn dmal_control(_: &EntityInstance) -> EnemyControl {
-    EnemyControl::Malice
 }
 
 /// Marks pc, who must remain alive
-#[derive(Default, Component)]
+#[derive(Component)]
 struct Player;
 
 /// Marks npc, who can be defeated
-#[derive(Default, Component)]
+#[derive(Component)]
 struct Enemy;
 
-#[derive(Default, Component)]
+/// Marks a UI element hidden except while in loading state
+#[derive(Component)]
 struct LoadingScreenElement;
 
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
@@ -264,10 +228,16 @@ fn init_cells(
     Ok(())
 }
 
-fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Actor>>) {
-    for id in query.iter_mut() {
-        commands
-            .entity(id)
+fn init_entity(
+    mut commands: Commands,
+    mut effects: ResMut<Assets<EffectAsset>>,
+    mut query: Query<(Entity, &Ldtk, &Transform), Added<Ldtk>>,
+) {
+    for (id, ldtk, transform) in query.iter_mut() {
+        let mut batch = commands.entity(id);
+
+        // add physics
+        batch
             .insert(RigidBody::Dynamic)
             .insert(Velocity::default())
             .insert(ExternalImpulse::default())
@@ -292,6 +262,51 @@ fn init_entity(mut commands: Commands, mut query: Query<Entity, Added<super::Act
                     .insert(Restitution::coefficient(1.0))
                     .insert(ActiveEvents::COLLISION_EVENTS);
             });
+
+        // add gameplay
+        match ldtk.identifier.as_str() {
+            "player" => {
+                batch.insert(Player).insert(PlayerControl).insert(Actor {
+                    sfx: "player-fall.ogg".into(),
+                });
+            }
+            "d_resignation" => {
+                batch.insert(Enemy).insert(Actor {
+                    sfx: "enemy-fall.ogg".into(),
+                });
+            }
+            "d_cowardice" => {
+                batch
+                    .insert(Enemy)
+                    .insert(EnemyControl::Cowardice)
+                    .insert(Actor {
+                        sfx: "enemy-fall.ogg".into(),
+                    });
+            }
+            "d_malice" => {
+                batch
+                    .insert(Enemy)
+                    .insert(EnemyControl::Malice)
+                    .insert(Actor {
+                        sfx: "enemy-fall.ogg".into(),
+                    });
+            }
+            _ => {
+                warn!("unknown LDTK entity '{}'", ldtk.identifier);
+            }
+        };
+
+        // add movement fx
+        let key_color = match ldtk.identifier.as_str() {
+            "player" => Vec4::new(0.0, 0.0, 1.0, 1.0),
+            _ => Vec4::new(1.0, 0.0, 0.0, 1.0),
+        };
+        let effect_handle = super::create_vfx(&mut effects, key_color);
+        batch.insert(ParticleEffectBundle {
+            effect: ParticleEffect::new(effect_handle),
+            transform: Transform::from_translation(transform.translation),
+            ..default()
+        });
     }
 }
 
@@ -345,9 +360,6 @@ impl Plugin for LevelPlugin {
             .add_systems(OnEnter(AppState::Loading), enable_tiles(false))
             .add_systems(OnEnter(AppState::Playing), enable_tiles(true))
             .insert_resource(LevelSelection::Index(self.level_select))
-            .register_ldtk_entity::<PlayerBundle>("player")
-            .register_ldtk_entity::<DResBundle>("d_resignation")
-            .register_ldtk_entity::<DCowBundle>("d_cowardice")
-            .register_ldtk_entity::<DMalBundle>("d_malice");
+            .register_default_ldtk_entity::<LdtkEntityBundle>();
     }
 }

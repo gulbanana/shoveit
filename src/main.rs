@@ -1,4 +1,6 @@
-use bevy::{math::Vec3Swizzles, prelude::*, render::camera::ScalingMode};
+use bevy::prelude::*;
+use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
+use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::{lens::TransformScaleLens, *};
 use std::f32::consts::PI;
@@ -54,55 +56,6 @@ struct PlayerControl;
 enum EnemyControl {
     Cowardice,
     Malice,
-}
-
-fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    let mut level_select = 0;
-    if let Some(arg1) = args.get(1) {
-        if let Ok(index) = arg1.parse() {
-            level_select = index;
-        }
-    }
-
-    App::new()
-        .add_plugins((
-            DefaultPlugins
-                .set(ImagePlugin::default_nearest())
-                .set(WindowPlugin {
-                    primary_window: Some(Window {
-                        title: "Shove it!".into(),
-                        ..default()
-                    }),
-                    ..default()
-                }),
-            TweeningPlugin,
-            level::plugin(level_select),
-            collision::plugin(),
-        ))
-        .add_state::<AppState>()
-        .add_event::<InputEvent>()
-        .add_event::<InteractionEvent>()
-        .add_event::<CacheEvent>()
-        .add_systems(Startup, setup)
-        .add_systems(
-            Update,
-            (
-                keyboard_input.before(move_player),
-                move_player.before(cap_player_velocity),
-                cap_player_velocity,
-                trigger_interaction,
-                die_after_fall,
-            )
-                .run_if(in_state(AppState::Playing)),
-        )
-        .run();
-}
-
-fn handle(result: In<anyhow::Result<()>>) {
-    if let In(Result::Err(cause)) = result {
-        error!("{}", cause);
-    }
 }
 
 fn setup(mut commands: Commands) {
@@ -209,6 +162,14 @@ fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
     }
 }
 
+fn trigger_vfx(mut query: Query<(&Velocity, &mut EffectSpawner), With<Actor>>) {
+    for (velocity, mut spawner) in query.iter_mut() {
+        if velocity.linvel != Vec2::ZERO {
+            spawner.reset();
+        }
+    }
+}
+
 fn trigger_interaction(
     assets: Res<AssetServer>,
     mut commands: Commands,
@@ -270,4 +231,102 @@ fn die_after_fall(
         commands.entity(fallen.entity).despawn_recursive();
         cache_events.send(CacheEvent::InvalidateColliderHierarchy);
     }
+}
+
+fn main() {
+    let args: Vec<String> = std::env::args().collect();
+    let mut level_select = 0;
+    if let Some(arg1) = args.get(1) {
+        if let Ok(index) = arg1.parse() {
+            level_select = index;
+        }
+    }
+
+    App::new()
+        .add_plugins((
+            DefaultPlugins
+                .set(ImagePlugin::default_nearest())
+                .set(WindowPlugin {
+                    primary_window: Some(Window {
+                        title: "Shove it!".into(),
+                        ..default()
+                    }),
+                    ..default()
+                }),
+            TweeningPlugin,
+            HanabiPlugin,
+            level::plugin(level_select),
+            collision::plugin(),
+        ))
+        .add_state::<AppState>()
+        .add_event::<InputEvent>()
+        .add_event::<InteractionEvent>()
+        .add_event::<CacheEvent>()
+        .add_systems(Startup, setup)
+        .add_systems(
+            Update,
+            (
+                keyboard_input.before(move_player),
+                move_player.before(cap_player_velocity),
+                cap_player_velocity,
+                trigger_vfx,
+                trigger_interaction,
+                die_after_fall,
+            )
+                .run_if(in_state(AppState::Playing)),
+        )
+        .run();
+}
+
+pub fn handle(result: In<anyhow::Result<()>>) {
+    if let In(Result::Err(cause)) = result {
+        error!("{}", cause);
+    }
+}
+
+pub fn create_vfx(
+    effects: &mut ResMut<Assets<EffectAsset>>,
+    key_color: Vec4,
+) -> Handle<EffectAsset> {
+    let mut gradient = Gradient::new();
+    gradient.add_key(0.0, key_color);
+    gradient.add_key(1.0, Vec4::splat(0.0));
+    let render_color = ColorOverLifetimeModifier { gradient };
+
+    let mut module = Module::default();
+
+    let render_size = SetSizeModifier {
+        size: CpuValue::Uniform((Vec2::new(5.0, 5.0), Vec2::new(10.0, 10.0))),
+        screen_space_size: false,
+    };
+
+    // pos = c + r * dir
+    let init_pos = SetPositionCircleModifier {
+        center: module.lit(Vec3::ZERO),
+        radius: module.lit(100.0),
+        axis: module.lit(Vec3::Z),
+        dimension: ShapeDimension::Surface,
+    };
+
+    // radial velocity (away from center)
+    let init_vel = SetVelocityCircleModifier {
+        center: module.lit(Vec3::ZERO),
+        axis: module.lit(Vec3::Z),
+        speed: module.lit(1.0),
+    };
+
+    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(3.0));
+
+    let mut effect = EffectAsset::new(32768, Spawner::once(1.0.into(), false), module)
+        .with_name("OrbRing")
+        .init(init_pos)
+        .init(init_vel)
+        .init(init_lifetime)
+        .render(render_size)
+        .render(render_color);
+
+    effect.z_layer_2d = 4.0; // XXX investigate why this works and 500.0 does not
+
+    // Insert into the asset system
+    return effects.add(effect);
 }
