@@ -1,4 +1,7 @@
-use crate::{collision, vfx, Actor, AppState, CacheEvent, EnemyControl, PlayerControl, Tile};
+use crate::{
+    ai::insert_thinker, collision, vfx, AppState, CacheEvent, EnemyControl, Orb, PlayerControl,
+    Tile,
+};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
@@ -234,6 +237,7 @@ fn init_entity(
 ) {
     for (id, ldtk) in query.iter_mut() {
         let mut batch = commands.entity(id);
+        batch.insert(Name::new(ldtk.identifier.clone()));
 
         // add physics
         batch
@@ -244,7 +248,7 @@ fn init_entity(
                 children
                     .spawn(Collider::ball(100.0))
                     .insert(CollisionGroups::new(
-                        collision::GROUP_ACTOR,
+                        collision::GROUP_ORB,
                         collision::FILTER_MAIN,
                     ))
                     .insert(ColliderMassProperties::Mass(1.0))
@@ -272,13 +276,13 @@ fn init_entity(
         // add gameplay
         match ldtk.identifier.as_str() {
             "player" => {
-                batch.insert(Player).insert(PlayerControl).insert(Actor {
+                batch.insert(Player).insert(PlayerControl).insert(Orb {
                     vfx: effect_handle,
                     sfx: "player-fall.ogg".into(),
                 });
             }
             "d_resignation" => {
-                batch.insert(Enemy).insert(Actor {
+                batch.insert(Enemy).insert(Orb {
                     vfx: effect_handle,
                     sfx: "enemy-fall.ogg".into(),
                 });
@@ -287,19 +291,21 @@ fn init_entity(
                 batch
                     .insert(Enemy)
                     .insert(EnemyControl::Cowardice)
-                    .insert(Actor {
+                    .insert(Orb {
                         vfx: effect_handle,
                         sfx: "enemy-fall.ogg".into(),
                     });
+                insert_thinker(&mut batch);
             }
             "d_malice" => {
                 batch
                     .insert(Enemy)
                     .insert(EnemyControl::Malice)
-                    .insert(Actor {
+                    .insert(Orb {
                         vfx: effect_handle,
                         sfx: "enemy-fall.ogg".into(),
                     });
+                insert_thinker(&mut batch);
             }
             _ => {
                 warn!("unknown LDTK entity '{}'", ldtk.identifier);

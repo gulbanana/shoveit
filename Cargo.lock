@@ -1089,6 +1089,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "big-brain"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ca84fca00ea07a9cd447f219f27d79366aaf02439a0226b0a28a7a9ed083cb9c"
+dependencies = [
+ "bevy",
+ "big-brain-derive",
+]
+
+[[package]]
+name = "big-brain-derive"
+version = "0.18.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ed1182a1a029aeb2aa54b5a06250559fc1f69a50e7008ab66c6f7907973e4592"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "bindgen"
 version = "0.69.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3204,6 +3225,7 @@ dependencies = [
  "bevy_hanabi",
  "bevy_rapier2d",
  "bevy_tweening",
+ "big-brain",
  "serde",
  "serde_json",
 ]

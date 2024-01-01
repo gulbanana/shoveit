@@ -1,11 +1,11 @@
 use bevy::{ecs::system::SystemParam, prelude::*, utils::HashSet};
 use bevy_rapier2d::prelude::*;
 
-use crate::{Actor, AppState, CacheEvent, InteractionEvent, OpaquePlugin, Tile};
+use crate::{AppState, CacheEvent, InteractionEvent, OpaquePlugin, Orb, Tile};
 
 pub const GROUP_ONLY_ALL: Group = Group::from_bits_truncate(1 << 31);
 pub const GROUP_WALL: Group = Group::from_bits_truncate(0b0001);
-pub const GROUP_ACTOR: Group = Group::from_bits_truncate(0b0010);
+pub const GROUP_ORB: Group = Group::from_bits_truncate(0b0010);
 pub const GROUP_PIT: Group = Group::from_bits_truncate(0b0100);
 pub const GROUP_PIT_WALL: Group = Group::from_bits_truncate(0b1000);
 
@@ -18,7 +18,7 @@ pub const FILTER_WALLS: Group = Group::from_bits_truncate(0b1001);
 struct ColliderEntities {
     wall_colliders: HashSet<Entity>,
     pit_colliders: HashSet<Entity>,
-    actor_colliders: HashSet<Entity>,
+    orb_colliders: HashSet<Entity>,
 }
 
 #[derive(Component)]
@@ -51,7 +51,7 @@ fn cache_collider_hierarchy(
     mut cache: ResMut<ColliderEntities>,
     mut input: EventReader<CacheEvent>,
     tiles: Query<(&Children, &Tile)>,
-    actors: Query<&Children, With<Actor>>,
+    orbs: Query<&Children, With<Orb>>,
 ) {
     if input
         .iter()
@@ -73,9 +73,9 @@ fn cache_collider_hierarchy(
             }
         }
 
-        for children in actors.iter() {
+        for children in orbs.iter() {
             for child in children.iter() {
-                cache.actor_colliders.insert(*child);
+                cache.orb_colliders.insert(*child);
             }
         }
     }
@@ -108,19 +108,19 @@ fn detect_collisions(
             if cache.pit_colliders.contains(e1) && !fallen_orbs.contains(e2) {
                 if let Some((_, p2)) = get_parents(e1, e2) {
                     fallen_orbs.insert(e2);
-                    output.send(InteractionEvent::ActorEnterPit(p2));
+                    output.send(InteractionEvent::OrbHitPit(p2));
                 }
             } else if cache.pit_colliders.contains(e2) && !fallen_orbs.contains(e1) {
                 if let Some((p1, _)) = get_parents(e1, e2) {
                     fallen_orbs.insert(e1);
-                    output.send(InteractionEvent::ActorEnterPit(p1));
+                    output.send(InteractionEvent::OrbHitPit(p1));
                 }
-            } else if (cache.wall_colliders.contains(e1) && cache.actor_colliders.contains(e2))
-                || (cache.wall_colliders.contains(e2) && cache.actor_colliders.contains(e1))
+            } else if (cache.wall_colliders.contains(e1) && cache.orb_colliders.contains(e2))
+                || (cache.wall_colliders.contains(e2) && cache.orb_colliders.contains(e1))
             {
-                output.send(InteractionEvent::ActorHitWall);
-            } else if cache.actor_colliders.contains(e1) && cache.actor_colliders.contains(e2) {
-                output.send(InteractionEvent::ActorHitActor);
+                output.send(InteractionEvent::OrbHitWall);
+            } else if cache.orb_colliders.contains(e1) && cache.orb_colliders.contains(e2) {
+                output.send(InteractionEvent::OrbHitOrb);
             } else {
                 warn!("unknown collision between {e1:?} and {e2:?}");
             }
@@ -157,7 +157,7 @@ pub fn plugin() -> impl Plugin {
         .insert_resource(ColliderEntities {
             wall_colliders: HashSet::new(),
             pit_colliders: HashSet::new(),
-            actor_colliders: HashSet::new(),
+            orb_colliders: HashSet::new(),
         });
     })
 }

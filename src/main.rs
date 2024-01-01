@@ -1,19 +1,17 @@
-use bevy::prelude::*;
-use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
-use bevy_rapier2d::prelude::*;
-use bevy_tweening::{lens::TransformScaleLens, *};
-use std::f32::consts::PI;
 use std::time::Duration;
 
+use bevy::{prelude::*, render::camera::ScalingMode};
+use bevy_rapier2d::prelude::*;
+use bevy_tweening::{lens::TransformScaleLens, *};
+
+mod ai;
 mod collision;
 mod level;
+mod movement;
 mod vfx;
 
 // pixels per second
 const MAX_V: f32 = 3000.0;
-// pixels per second per second
-const ACCEL_V: f32 = 750.0;
-const DECEL_V: f32 = -1500.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
@@ -32,9 +30,9 @@ enum InputEvent {
 /// Interactions detected by physics
 #[derive(Event)]
 enum InteractionEvent {
-    ActorHitActor,
-    ActorHitWall,
-    ActorEnterPit(Entity),
+    OrbHitOrb,
+    OrbHitWall,
+    OrbHitPit(Entity),
 }
 
 #[derive(Event)]
@@ -49,9 +47,9 @@ enum Tile {
     Pit,
 }
 
-/// Moves around the level, interacting with other actors and with tiles
+/// Moves around the level, interacting with other orbs and with tiles
 #[derive(Component)]
-struct Actor {
+struct Orb {
     sfx: String,
     vfx: Handle<vfx::EffectAsset>,
 }
@@ -119,61 +117,42 @@ fn move_player(
     mut events: EventReader<InputEvent>,
     mut query: Query<
         (&mut Transform, &mut Velocity, &mut ExternalImpulse),
-        (With<PlayerControl>, With<Actor>),
+        (With<PlayerControl>, With<Orb>),
     >,
 ) {
     for event in events.iter() {
         match *event {
             InputEvent::Decelerate => {
                 for (_, velocity, mut impulse) in query.iter_mut() {
-                    let antithrust = velocity.linvel.normalize();
-                    impulse.impulse = (antithrust * DECEL_V * time.delta_seconds())
-                        .clamp_length(0.0, velocity.linvel.length());
+                    movement::decelerate_orb(&time, velocity.as_ref(), impulse.as_mut())
                 }
             }
             InputEvent::Accelerate(thrust) => {
                 for (mut transform, mut velocity, mut impulse) in query.iter_mut() {
-                    let forward = (transform.rotation * Vec3::Y).xy();
-                    let forward_dot_goal = forward.dot(thrust);
-
-                    // if facing ⋅ thrust is significant, rotate towards thrust
-                    if (forward_dot_goal - 1.0).abs() >= f32::EPSILON {
-                        // cancel any tumbling
-                        velocity.angvel = 0.0;
-
-                        // +ve=anticlockwise, -ve=clockwise (right hand rule)
-                        let right = (transform.rotation * Vec3::X).xy();
-                        let right_dot_goal = right.dot(thrust);
-                        let sign = -f32::copysign(1.0, right_dot_goal);
-
-                        // avoid overshoot
-                        let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
-                        let rotation_angle =
-                            (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
-
-                        transform.rotate_z(rotation_angle);
-                    }
-                    // otherwise, apply thrust in the direction we are now facing
-                    else {
-                        impulse.impulse = thrust * ACCEL_V * time.delta_seconds();
-                    }
+                    movement::accelerate_orb(
+                        &time,
+                        thrust,
+                        transform.as_mut(),
+                        velocity.as_mut(),
+                        impulse.as_mut(),
+                    );
                 }
             }
         }
     }
 }
 
-fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
+fn cap_velocity(mut query: Query<&mut Velocity, With<Orb>>) {
     for mut velocity in query.iter_mut() {
         velocity.linvel = velocity.linvel.clamp_length_max(MAX_V);
     }
 }
 
-fn trigger_vfx(mut commands: Commands, mut query: Query<(Entity, &Actor, &ExternalImpulse)>) {
-    for (entity, actor, impulse) in query.iter_mut() {
+fn trigger_vfx(mut commands: Commands, mut query: Query<(Entity, &Orb, &ExternalImpulse)>) {
+    for (entity, orb, impulse) in query.iter_mut() {
         if impulse.impulse != Vec2::ZERO {
             commands.entity(entity).with_children(|children| {
-                vfx::instantiate_thrust_sparks(children, actor.vfx.clone(), impulse.impulse);
+                vfx::instantiate_thrust_sparks(children, orb.vfx.clone(), impulse.impulse);
             });
         }
     }
@@ -183,26 +162,26 @@ fn trigger_interaction(
     assets: Res<AssetServer>,
     mut commands: Commands,
     mut events: EventReader<InteractionEvent>,
-    actors: Query<&Actor>,
+    orbs: Query<&Orb>,
 ) {
     for event in events.iter() {
         match event {
-            InteractionEvent::ActorHitWall => {
+            InteractionEvent::OrbHitWall => {
                 commands.spawn(AudioBundle {
                     source: assets.load("pobble.ogg"),
                     ..default()
                 });
             }
-            InteractionEvent::ActorHitActor => {
+            InteractionEvent::OrbHitOrb => {
                 commands.spawn(AudioBundle {
                     source: assets.load("pobblebonk.ogg"),
                     ..default()
                 });
             }
-            InteractionEvent::ActorEnterPit(actor) => {
-                if let Ok(actor) = actors.get(*actor) {
+            InteractionEvent::OrbHitPit(entity) => {
+                if let Ok(orb) = orbs.get(*entity) {
                     commands.spawn(AudioBundle {
-                        source: assets.load(&actor.sfx),
+                        source: assets.load(&orb.sfx),
                         ..default()
                     });
                 }
@@ -219,8 +198,8 @@ fn trigger_interaction(
                 .with_completed_event(0);
 
                 commands
-                    .entity(*actor)
-                    .remove::<Actor>()
+                    .entity(*entity)
+                    .remove::<Orb>()
                     .insert(Animator::new(tween))
                     .despawn_descendants()
                     .with_children(|children| {
@@ -244,7 +223,7 @@ fn die_after_fall(
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut level_select = 0;
+    let mut level_select = 1;
     if let Some(arg1) = args.get(1) {
         if let Ok(index) = arg1.parse() {
             level_select = index;
@@ -254,6 +233,10 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins
+                // .set(bevy::log::LogPlugin {
+                //     filter: "wgpu=error,naga=warn,big_brain=debug".to_string(),
+                //     ..default()
+                // })
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
@@ -263,6 +246,7 @@ fn main() {
                     ..default()
                 }),
             TweeningPlugin,
+            ai::plugin(),
             level::plugin(level_select),
             collision::plugin(),
             vfx::plugin(),
@@ -276,8 +260,8 @@ fn main() {
             Update,
             (
                 keyboard_input.before(move_player),
-                move_player.before(cap_player_velocity),
-                cap_player_velocity,
+                move_player.before(cap_velocity),
+                cap_velocity,
                 trigger_vfx.after(move_player),
                 trigger_interaction,
                 die_after_fall,
