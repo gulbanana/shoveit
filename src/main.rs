@@ -1,6 +1,5 @@
 use bevy::prelude::*;
 use bevy::{math::Vec3Swizzles, render::camera::ScalingMode};
-use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::{lens::TransformScaleLens, *};
 use std::f32::consts::PI;
@@ -8,6 +7,13 @@ use std::time::Duration;
 
 mod collision;
 mod level;
+mod vfx;
+
+// pixels per second
+const MAX_V: f32 = 3000.0;
+// pixels per second per second
+const ACCEL_V: f32 = 750.0;
+const DECEL_V: f32 = -1500.0;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash, States)]
 enum AppState {
@@ -47,6 +53,7 @@ enum Tile {
 #[derive(Component)]
 struct Actor {
     sfx: String,
+    vfx: Handle<vfx::EffectAsset>,
 }
 
 #[derive(Component, Default)]
@@ -120,7 +127,7 @@ fn move_player(
             InputEvent::Decelerate => {
                 for (_, velocity, mut impulse) in query.iter_mut() {
                     let antithrust = velocity.linvel.normalize();
-                    impulse.impulse = (antithrust * -1500.0 * time.delta_seconds())
+                    impulse.impulse = (antithrust * DECEL_V * time.delta_seconds())
                         .clamp_length(0.0, velocity.linvel.length());
                 }
             }
@@ -148,7 +155,7 @@ fn move_player(
                     }
                     // otherwise, apply thrust in the direction we are now facing
                     else {
-                        impulse.impulse = thrust * 750.0 * time.delta_seconds();
+                        impulse.impulse = thrust * ACCEL_V * time.delta_seconds();
                     }
                 }
             }
@@ -158,14 +165,16 @@ fn move_player(
 
 fn cap_player_velocity(mut query: Query<&mut Velocity, With<PlayerControl>>) {
     for mut velocity in query.iter_mut() {
-        velocity.linvel = velocity.linvel.clamp_length_max(3000.0);
+        velocity.linvel = velocity.linvel.clamp_length_max(MAX_V);
     }
 }
 
-fn trigger_vfx(mut query: Query<(&Velocity, &mut EffectSpawner), With<Actor>>) {
-    for (velocity, mut spawner) in query.iter_mut() {
-        if velocity.linvel != Vec2::ZERO {
-            spawner.reset();
+fn trigger_vfx(mut commands: Commands, mut query: Query<(Entity, &Actor, &ExternalImpulse)>) {
+    for (entity, actor, impulse) in query.iter_mut() {
+        if impulse.impulse != Vec2::ZERO {
+            commands.entity(entity).with_children(|children| {
+                vfx::instantiate_thrust_sparks(children, actor.vfx.clone(), impulse.impulse);
+            });
         }
     }
 }
@@ -254,9 +263,9 @@ fn main() {
                     ..default()
                 }),
             TweeningPlugin,
-            HanabiPlugin,
             level::plugin(level_select),
             collision::plugin(),
+            vfx::plugin(),
         ))
         .add_state::<AppState>()
         .add_event::<InputEvent>()
@@ -269,7 +278,7 @@ fn main() {
                 keyboard_input.before(move_player),
                 move_player.before(cap_player_velocity),
                 cap_player_velocity,
-                trigger_vfx,
+                trigger_vfx.after(move_player),
                 trigger_interaction,
                 die_after_fall,
             )
@@ -278,55 +287,21 @@ fn main() {
         .run();
 }
 
+struct OpaquePlugin<T>(T)
+where
+    T: Fn(&mut App);
+
+impl<T> Plugin for OpaquePlugin<T>
+where
+    T: Fn(&mut App) + Send + Sync + 'static,
+{
+    fn build(&self, app: &mut App) {
+        self.0(app);
+    }
+}
+
 pub fn handle(result: In<anyhow::Result<()>>) {
     if let In(Result::Err(cause)) = result {
         error!("{}", cause);
     }
-}
-
-pub fn create_vfx(
-    effects: &mut ResMut<Assets<EffectAsset>>,
-    key_color: Vec4,
-) -> Handle<EffectAsset> {
-    let mut gradient = Gradient::new();
-    gradient.add_key(0.0, key_color);
-    gradient.add_key(1.0, Vec4::splat(0.0));
-    let render_color = ColorOverLifetimeModifier { gradient };
-
-    let mut module = Module::default();
-
-    let render_size = SetSizeModifier {
-        size: CpuValue::Uniform((Vec2::new(5.0, 5.0), Vec2::new(10.0, 10.0))),
-        screen_space_size: false,
-    };
-
-    // pos = c + r * dir
-    let init_pos = SetPositionCircleModifier {
-        center: module.lit(Vec3::ZERO),
-        radius: module.lit(100.0),
-        axis: module.lit(Vec3::Z),
-        dimension: ShapeDimension::Surface,
-    };
-
-    // radial velocity (away from center)
-    let init_vel = SetVelocityCircleModifier {
-        center: module.lit(Vec3::ZERO),
-        axis: module.lit(Vec3::Z),
-        speed: module.lit(1.0),
-    };
-
-    let init_lifetime = SetAttributeModifier::new(Attribute::LIFETIME, module.lit(3.0));
-
-    let mut effect = EffectAsset::new(32768, Spawner::once(1.0.into(), false), module)
-        .with_name("OrbRing")
-        .init(init_pos)
-        .init(init_vel)
-        .init(init_lifetime)
-        .render(render_size)
-        .render(render_color);
-
-    effect.z_layer_2d = 4.0; // XXX investigate why this works and 500.0 does not
-
-    // Insert into the asset system
-    return effects.add(effect);
 }

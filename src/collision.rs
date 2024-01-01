@@ -1,7 +1,7 @@
 use bevy::{ecs::system::SystemParam, prelude::*, utils::HashSet};
 use bevy_rapier2d::prelude::*;
 
-use crate::{Actor, AppState, CacheEvent, InteractionEvent, Tile};
+use crate::{Actor, AppState, CacheEvent, InteractionEvent, OpaquePlugin, Tile};
 
 pub const GROUP_ONLY_ALL: Group = Group::from_bits_truncate(1 << 31);
 pub const GROUP_WALL: Group = Group::from_bits_truncate(0b0001);
@@ -138,10 +138,8 @@ fn become_tangible(mut commands: Commands, mut query: Query<(Entity, &mut Intang
     }
 }
 
-struct CollisionPlugin;
-
-impl Plugin for CollisionPlugin {
-    fn build(&self, app: &mut App) {
+pub fn plugin() -> impl Plugin {
+    OpaquePlugin(|app| {
         app.add_plugins(
             RapierPhysicsPlugin::<Hooks>::pixels_per_meter(100.0),
             //RapierDebugRenderPlugin::default(),
@@ -161,11 +159,7 @@ impl Plugin for CollisionPlugin {
             pit_colliders: HashSet::new(),
             actor_colliders: HashSet::new(),
         });
-    }
-}
-
-pub fn plugin() -> impl Plugin {
-    CollisionPlugin
+    })
 }
 
 // XXX surely there is a builtin version of this

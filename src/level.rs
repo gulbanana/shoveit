@@ -1,8 +1,7 @@
-use crate::{collision, Actor, AppState, CacheEvent, EnemyControl, PlayerControl, Tile};
+use crate::{collision, vfx, Actor, AppState, CacheEvent, EnemyControl, PlayerControl, Tile};
 use anyhow::Context;
 use bevy::{prelude::*, utils::HashMap};
 use bevy_ecs_ldtk::prelude::*;
-use bevy_hanabi::prelude::*;
 use bevy_rapier2d::prelude::*;
 use serde::Deserialize;
 
@@ -230,10 +229,10 @@ fn init_cells(
 
 fn init_entity(
     mut commands: Commands,
-    mut effects: ResMut<Assets<EffectAsset>>,
-    mut query: Query<(Entity, &Ldtk, &Transform), Added<Ldtk>>,
+    mut effects: ResMut<Assets<vfx::EffectAsset>>,
+    mut query: Query<(Entity, &Ldtk), Added<Ldtk>>,
 ) {
-    for (id, ldtk, transform) in query.iter_mut() {
+    for (id, ldtk) in query.iter_mut() {
         let mut batch = commands.entity(id);
 
         // add physics
@@ -263,15 +262,24 @@ fn init_entity(
                     .insert(ActiveEvents::COLLISION_EVENTS);
             });
 
+        // add movement fx
+        let key_color = match ldtk.identifier.as_str() {
+            "player" => Vec4::new(0.2, 0.2, 1.0, 1.0),
+            _ => Vec4::new(1.0, 0.1, 0.1, 1.0),
+        };
+        let effect_handle = vfx::allocate_thrust_sparks(&mut effects, key_color);
+
         // add gameplay
         match ldtk.identifier.as_str() {
             "player" => {
                 batch.insert(Player).insert(PlayerControl).insert(Actor {
+                    vfx: effect_handle,
                     sfx: "player-fall.ogg".into(),
                 });
             }
             "d_resignation" => {
                 batch.insert(Enemy).insert(Actor {
+                    vfx: effect_handle,
                     sfx: "enemy-fall.ogg".into(),
                 });
             }
@@ -280,6 +288,7 @@ fn init_entity(
                     .insert(Enemy)
                     .insert(EnemyControl::Cowardice)
                     .insert(Actor {
+                        vfx: effect_handle,
                         sfx: "enemy-fall.ogg".into(),
                     });
             }
@@ -288,6 +297,7 @@ fn init_entity(
                     .insert(Enemy)
                     .insert(EnemyControl::Malice)
                     .insert(Actor {
+                        vfx: effect_handle,
                         sfx: "enemy-fall.ogg".into(),
                     });
             }
@@ -295,18 +305,6 @@ fn init_entity(
                 warn!("unknown LDTK entity '{}'", ldtk.identifier);
             }
         };
-
-        // add movement fx
-        let key_color = match ldtk.identifier.as_str() {
-            "player" => Vec4::new(0.0, 0.0, 1.0, 1.0),
-            _ => Vec4::new(1.0, 0.0, 0.0, 1.0),
-        };
-        let effect_handle = super::create_vfx(&mut effects, key_color);
-        batch.insert(ParticleEffectBundle {
-            effect: ParticleEffect::new(effect_handle),
-            transform: Transform::from_translation(transform.translation),
-            ..default()
-        });
     }
 }
 
