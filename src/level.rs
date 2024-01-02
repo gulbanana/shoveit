@@ -3,7 +3,13 @@ use crate::{
     Tile,
 };
 use anyhow::Context;
-use bevy::{prelude::*, utils::HashMap};
+use bevy::{
+    math::Vec3Swizzles,
+    prelude::*,
+    sprite::Anchor,
+    text::{Text2dBounds, TextLayoutInfo},
+    utils::HashMap,
+};
 use bevy_ecs_ldtk::prelude::*;
 use bevy_rapier2d::prelude::*;
 use serde::Deserialize;
@@ -37,22 +43,45 @@ impl CustomData {
 /// Blueprint bundle with extracted data and sprite
 #[derive(Bundle, LdtkEntity)]
 struct LdtkEntityBundle {
-    #[with(Ldtk::new)]
-    ldtk: Ldtk,
+    #[with(LdtkOrb::new)]
+    ldtk: LdtkOrb,
     #[sprite_sheet_bundle]
     sprite_bundle: SpriteSheetBundle,
 }
 
 ///  Contains data from LDTK entities for blueprinting
 #[derive(Component)]
-struct Ldtk {
+struct LdtkOrb {
     identifier: String,
 }
 
-impl Ldtk {
-    fn new(instance: &EntityInstance) -> Ldtk {
-        Ldtk {
+impl LdtkOrb {
+    fn new(instance: &EntityInstance) -> LdtkOrb {
+        LdtkOrb {
             identifier: instance.identifier.clone(),
+        }
+    }
+}
+
+// special bundle for on-screen text
+#[derive(Bundle, LdtkEntity)]
+struct TipBundle {
+    #[with(LdtkTxt::new)]
+    ldtk: LdtkTxt,
+}
+
+#[derive(Component)]
+struct LdtkTxt {
+    data: String,
+}
+
+impl LdtkTxt {
+    fn new(instance: &EntityInstance) -> LdtkTxt {
+        LdtkTxt {
+            data: instance
+                .get_string_field("data")
+                .expect("missing txt.data")
+                .clone(),
         }
     }
 }
@@ -230,10 +259,10 @@ fn init_cells(
     Ok(())
 }
 
-fn init_entity(
+fn init_orb(
     mut commands: Commands,
     mut effects: ResMut<Assets<vfx::EffectAsset>>,
-    mut query: Query<(Entity, &Ldtk), Added<Ldtk>>,
+    mut query: Query<(Entity, &LdtkOrb), Added<LdtkOrb>>,
 ) {
     for (id, ldtk) in query.iter_mut() {
         let mut batch = commands.entity(id);
@@ -314,6 +343,30 @@ fn init_entity(
     }
 }
 
+fn init_txt(
+    mut commands: Commands,
+    mut query: Query<(Entity, &LdtkTxt, &mut Transform), Added<LdtkTxt>>,
+) {
+    for (id, ldtk, mut transform) in query.iter_mut() {
+        let size = transform.scale.xy() * 256.0;
+        transform.scale = Vec3::ONE;
+
+        commands
+            .entity(id)
+            .insert(Text::from_section(
+                &ldtk.data,
+                TextStyle {
+                    color: Color::WHITE,
+                    font_size: 128.0,
+                    ..default()
+                },
+            ))
+            .insert(Text2dBounds { size })
+            .insert(TextLayoutInfo::default())
+            .insert(Anchor::Center);
+    }
+}
+
 fn respawn_after_death(
     mut commands: Commands,
     mut next_state: ResMut<NextState<AppState>>,
@@ -355,7 +408,12 @@ impl Plugin for LevelPlugin {
             .add_systems(
                 Update,
                 (
-                    (init_cells.pipe(super::handle), init_entity, detect_loaded)
+                    (
+                        init_cells.pipe(super::handle),
+                        init_orb,
+                        init_txt,
+                        detect_loaded,
+                    )
                         .run_if(in_state(AppState::Loading)),
                     (respawn_after_death, advance_after_victory)
                         .run_if(in_state(AppState::Playing)),
@@ -364,6 +422,7 @@ impl Plugin for LevelPlugin {
             .add_systems(OnEnter(AppState::Loading), enable_tiles(false))
             .add_systems(OnEnter(AppState::Playing), enable_tiles(true))
             .insert_resource(LevelSelection::Index(self.level_select))
-            .register_default_ldtk_entity::<LdtkEntityBundle>();
+            .register_default_ldtk_entity::<LdtkEntityBundle>()
+            .register_ldtk_entity::<TipBundle>("txt");
     }
 }

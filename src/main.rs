@@ -223,7 +223,7 @@ fn die_after_fall(
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
-    let mut level_select = 1;
+    let mut level_select = 0;
     if let Some(arg1) = args.get(1) {
         if let Ok(index) = arg1.parse() {
             level_select = index;
