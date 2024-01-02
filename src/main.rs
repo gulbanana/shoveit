@@ -90,19 +90,19 @@ fn keyboard_input(input: Res<Input<KeyCode>>, mut events: EventWriter<InputEvent
     // if not braking, we may thrust
     let mut thrust = Vec2::ZERO;
 
-    if input.pressed(KeyCode::Right) {
+    if input.pressed(KeyCode::Right) || input.pressed(KeyCode::D) {
         thrust.x += 1.0;
     }
 
-    if input.pressed(KeyCode::Left) {
+    if input.pressed(KeyCode::Left) || input.pressed(KeyCode::A) {
         thrust.x -= 1.0;
     }
 
-    if input.pressed(KeyCode::Up) {
+    if input.pressed(KeyCode::Up) || input.pressed(KeyCode::W) {
         thrust.y += 1.0;
     }
 
-    if input.pressed(KeyCode::Down) {
+    if input.pressed(KeyCode::Down) || input.pressed(KeyCode::S) {
         thrust.y -= 1.0;
     }
 

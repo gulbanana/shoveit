@@ -16,6 +16,7 @@ use serde::Deserialize;
 
 const WALL_TILE: i32 = 1;
 const PIT_TILE: i32 = 2;
+const MAX_LEVEL: usize = 3;
 
 #[derive(Deserialize, Debug)]
 struct CustomData {
@@ -360,7 +361,8 @@ fn advance_after_victory(
 ) {
     if enemies.is_empty() {
         if let LevelSelection::Index(i) = level.into_inner() {
-            commands.insert_resource(LevelSelection::Index(1 - i));
+            let next_level = (i + 1) % MAX_LEVEL;
+            commands.insert_resource(LevelSelection::Index(next_level));
             next_state.set(AppState::Loading);
         }
     }
