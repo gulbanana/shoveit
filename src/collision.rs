@@ -3,16 +3,16 @@ use bevy_rapier2d::prelude::*;
 
 use crate::{AppState, CacheEvent, InteractionEvent, OpaquePlugin, Orb, Tile};
 
-pub const GROUP_ONLY_ALL: Group = Group::from_bits_truncate(1 << 31);
-pub const GROUP_WALL: Group = Group::from_bits_truncate(0b0001);
-pub const GROUP_ORB: Group = Group::from_bits_truncate(0b0010);
-pub const GROUP_PIT: Group = Group::from_bits_truncate(0b0100);
-pub const GROUP_PIT_WALL: Group = Group::from_bits_truncate(0b1000);
+const GROUP_ONLY_ALL: Group = Group::from_bits_truncate(1 << 31);
+const GROUP_WALL: Group = Group::from_bits_truncate(0b0001);
+const GROUP_ORB: Group = Group::from_bits_truncate(0b0010);
+const GROUP_PIT: Group = Group::from_bits_truncate(0b0100);
+const GROUP_PIT_WALL: Group = Group::from_bits_truncate(0b1000);
 
-pub const FILTER_ALL: Group = Group::from_bits_truncate(u32::MAX);
-pub const FILTER_MAIN: Group = Group::from_bits_truncate(0b0011);
-pub const FILTER_PITS: Group = Group::from_bits_truncate(0b0100);
-pub const FILTER_WALLS: Group = Group::from_bits_truncate(0b1001);
+const FILTER_ALL: Group = Group::from_bits_truncate(u32::MAX);
+const FILTER_MAIN: Group = Group::from_bits_truncate(0b0011);
+const FILTER_PITS: Group = Group::from_bits_truncate(0b0100);
+const FILTER_WALLS: Group = Group::from_bits_truncate(0b1001);
 
 #[derive(Resource)]
 struct ColliderEntities {
@@ -168,6 +168,13 @@ pub struct Rect {
     pub size: Vec2,
 }
 
+pub fn spawn_wall(children: &mut ChildBuilder) {
+    children
+        .spawn(Collider::cuboid(128.0, 128.0))
+        .insert(CollisionGroups::new(GROUP_WALL, FILTER_ALL))
+        .insert(Restitution::coefficient(1.0));
+}
+
 pub fn spawn_pit(children: &mut ChildBuilder, rect: &Rect) {
     children
         .spawn(SpatialBundle::from_transform(Transform::from_xyz(
@@ -191,6 +198,23 @@ pub fn spawn_pit_wall(children: &mut ChildBuilder, rect: &Rect) {
         .insert(CollisionGroups::new(GROUP_PIT_WALL, FILTER_ALL))
         .insert(Restitution::coefficient(1.0))
         .insert(ActiveHooks::FILTER_CONTACT_PAIRS);
+}
+
+pub fn spawn_orb(children: &mut ChildBuilder, mass: f32) {
+    children
+        .spawn(Collider::ball(100.0))
+        .insert(CollisionGroups::new(GROUP_ORB, FILTER_MAIN))
+        .insert(ColliderMassProperties::Mass(mass))
+        .insert(Restitution {
+            coefficient: 1.0,
+            combine_rule: CoefficientCombineRule::Min,
+        })
+        .insert(ActiveEvents::COLLISION_EVENTS);
+
+    children
+        .spawn(Collider::ball(0.0))
+        .insert(CollisionGroups::new(GROUP_ONLY_ALL, FILTER_PITS))
+        .insert(ActiveEvents::COLLISION_EVENTS);
 }
 
 pub fn spawn_falling_orb(children: &mut ChildBuilder) {

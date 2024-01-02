@@ -178,15 +178,9 @@ fn init_cells(
 
         match cell.value {
             WALL_TILE => {
-                batch.insert(Tile::Wall).with_children(|children| {
-                    children
-                        .spawn(Collider::cuboid(128.0, 128.0))
-                        .insert(CollisionGroups::new(
-                            collision::GROUP_WALL,
-                            collision::FILTER_ALL,
-                        ))
-                        .insert(Restitution::coefficient(1.0));
-                });
+                batch
+                    .insert(Tile::Wall)
+                    .with_children(collision::spawn_wall);
             }
             PIT_TILE => {
                 let (entry, walls) = if let Some(metadata) = metadata_by_coords.get(coords) {
@@ -266,34 +260,13 @@ fn init_orb(
 ) {
     for (id, ldtk) in query.iter_mut() {
         let mut batch = commands.entity(id);
-        batch.insert(Name::new(ldtk.identifier.clone()));
 
         // add physics
         batch
             .insert(RigidBody::Dynamic)
             .insert(Velocity::default())
             .insert(ExternalImpulse::default())
-            .with_children(|children| {
-                children
-                    .spawn(Collider::ball(100.0))
-                    .insert(CollisionGroups::new(
-                        collision::GROUP_ORB,
-                        collision::FILTER_MAIN,
-                    ))
-                    .insert(ColliderMassProperties::Mass(1.0))
-                    .insert(Restitution::coefficient(1.0))
-                    .insert(ActiveEvents::COLLISION_EVENTS);
-
-                children
-                    .spawn(Collider::ball(0.0))
-                    .insert(CollisionGroups::new(
-                        collision::GROUP_ONLY_ALL,
-                        collision::FILTER_PITS,
-                    ))
-                    .insert(ColliderMassProperties::Mass(1.0))
-                    .insert(Restitution::coefficient(1.0))
-                    .insert(ActiveEvents::COLLISION_EVENTS);
-            });
+            .with_children(|children| collision::spawn_orb(children, 1.0));
 
         // add movement fx
         let key_color = match ldtk.identifier.as_str() {

@@ -202,9 +202,7 @@ fn trigger_interaction(
                     .remove::<Orb>()
                     .insert(Animator::new(tween))
                     .despawn_descendants()
-                    .with_children(|children| {
-                        collision::spawn_falling_orb(children);
-                    });
+                    .with_children(collision::spawn_falling_orb);
             }
         }
     }
