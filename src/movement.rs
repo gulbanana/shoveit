@@ -38,7 +38,9 @@ pub fn accelerate_orb(
     }
 }
 
-pub fn decelerate_orb(time: &Res<Time>, velocity: &Velocity, impulse: &mut ExternalImpulse) {
+pub fn decelerate_orb(time: &Res<Time>, velocity: &mut Velocity, impulse: &mut ExternalImpulse) {
+    velocity.angvel = 0.0; // cheap, but w/e
+
     let mut antithrust = velocity.linvel.normalize();
     antithrust = antithrust * DECEL_V * time.delta_seconds();
     antithrust = antithrust.clamp_length(0.0, velocity.linvel.length());

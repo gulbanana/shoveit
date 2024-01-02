@@ -1,4 +1,4 @@
-use crate::{EnemyControl, OpaquePlugin, Orb, PlayerControl};
+use crate::{OpaquePlugin, Orb, PlayerInput};
 use bevy::{ecs::system::EntityCommands, math::Vec3Swizzles, prelude::*};
 use bevy_rapier2d::prelude::*;
 use big_brain::prelude::*;
@@ -11,10 +11,10 @@ enum Move {
 
 fn move_action(
     time: Res<Time>,
-    player: Query<&Transform, With<PlayerControl>>,
+    player: Query<&Transform, With<PlayerInput>>,
     mut orbs: Query<
         (&mut Transform, &mut Velocity, &mut ExternalImpulse),
-        (With<Orb>, Without<PlayerControl>),
+        (With<Orb>, Without<PlayerInput>),
     >,
     mut actions: Query<(&Actor, &mut ActionState, &Move)>,
 ) {
@@ -72,15 +72,15 @@ fn move_action(
 }
 
 #[derive(Clone, Component, Debug, ActionBuilder)]
-struct Stop;
+struct Halt;
 
-fn stop_action(
+fn halt_action(
     time: Res<Time>,
     mut orbs: Query<
         (&mut Transform, &mut Velocity, &mut ExternalImpulse),
-        (With<Orb>, Without<PlayerControl>),
+        (With<Orb>, Without<PlayerInput>),
     >,
-    mut actions: Query<(&Actor, &mut ActionState), With<Stop>>,
+    mut actions: Query<(&Actor, &mut ActionState), With<Halt>>,
 ) {
     for (Actor(actor), mut state) in actions.iter_mut() {
         if let Ok((_, mut velocity, mut impulse)) = orbs.get_mut(*actor) {
@@ -90,7 +90,7 @@ fn stop_action(
                     *state = ActionState::Executing;
                 }
                 ActionState::Executing => {
-                    if velocity.linvel == Vec2::ZERO {
+                    if velocity.angvel == 0.0 && velocity.linvel == Vec2::ZERO {
                         *state = ActionState::Success;
                     } else {
                         crate::movement::decelerate_orb(&time, velocity.as_mut(), impulse.as_mut());
@@ -108,12 +108,9 @@ fn stop_action(
 #[derive(Clone, Component, Debug, ScorerBuilder)]
 struct Flee;
 
-#[derive(Clone, Component, Debug, ScorerBuilder)]
-struct Charge;
-
 fn flee_scorer(
-    player: Query<&Transform, With<PlayerControl>>,
-    orbs: Query<(&Transform, &EnemyControl)>,
+    player: Query<&Transform, With<PlayerInput>>,
+    enemies: Query<&Transform, Without<PlayerInput>>,
     mut scorers: Query<(&Actor, &mut Score), With<Flee>>,
 ) {
     if let Ok(Transform {
@@ -122,13 +119,10 @@ fn flee_scorer(
     }) = player.get_single()
     {
         for (Actor(actor), mut score) in &mut scorers {
-            if let Ok((
-                Transform {
-                    translation: enemy_loc,
-                    ..
-                },
-                EnemyControl::Cowardice,
-            )) = orbs.get(*actor)
+            if let Ok(Transform {
+                translation: enemy_loc,
+                ..
+            }) = enemies.get(*actor)
             {
                 let distance_to_player = enemy_loc.distance(*player_loc) / 256.0;
                 let distance_within_3 = (3.0 - distance_to_player).clamp(0.0, 3.0);
@@ -141,9 +135,12 @@ fn flee_scorer(
     }
 }
 
+#[derive(Clone, Component, Debug, ScorerBuilder)]
+struct Charge;
+
 fn charge_scorer(
-    player: Query<&Transform, With<PlayerControl>>,
-    orbs: Query<(&Transform, &EnemyControl)>,
+    player: Query<&Transform, With<PlayerInput>>,
+    enemies: Query<&Transform, Without<PlayerInput>>,
     mut scorers: Query<(&Actor, &mut Score), With<Charge>>,
 ) {
     if let Ok(Transform {
@@ -152,13 +149,10 @@ fn charge_scorer(
     }) = player.get_single()
     {
         for (Actor(actor), mut score) in &mut scorers {
-            if let Ok((
-                Transform {
-                    translation: enemy_loc,
-                    ..
-                },
-                EnemyControl::Malice,
-            )) = orbs.get(*actor)
+            if let Ok(Transform {
+                translation: enemy_loc,
+                ..
+            }) = enemies.get(*actor)
             {
                 let distance_to_player = enemy_loc.distance(*player_loc) / 256.0;
                 let distance_beyond_3 = (distance_to_player - 3.0).clamp(0.0, 3.0);
@@ -171,16 +165,16 @@ fn charge_scorer(
     }
 }
 
+// low-value desire to stop moving
 #[derive(Clone, Component, Debug, ScorerBuilder)]
-struct Bored;
+struct Moving;
 
-fn bored_scorer(
-    orbs: Query<(&Transform, &EnemyControl)>,
-    mut scorers: Query<(&Actor, &mut Score), With<Bored>>,
-) {
+fn moving_scorer(orbs: Query<&Velocity>, mut scorers: Query<(&Actor, &mut Score), With<Moving>>) {
     for (Actor(actor), mut score) in &mut scorers {
-        if let Ok(_) = orbs.get(*actor) {
-            score.set(0.01);
+        if let Ok(velocity) = orbs.get(*actor) {
+            if velocity.angvel != 0.0 || velocity.linvel != Vec2::ZERO {
+                score.set(0.1);
+            }
         }
     }
 }
@@ -190,22 +184,40 @@ pub fn plugin() -> impl Plugin {
         app.add_plugins(BigBrainPlugin::new(PreUpdate))
             .add_systems(
                 PreUpdate,
-                (move_action, stop_action).in_set(BigBrainSet::Actions),
+                (move_action, halt_action).in_set(BigBrainSet::Actions),
             )
             .add_systems(
                 PreUpdate,
-                (flee_scorer, charge_scorer, bored_scorer).in_set(BigBrainSet::Scorers),
+                (flee_scorer, charge_scorer, moving_scorer).in_set(BigBrainSet::Scorers),
             );
     })
 }
 
-pub fn insert_thinker(entity: &mut EntityCommands) {
+pub fn spawn_intransigence(entity: &mut EntityCommands) {
+    entity.insert(
+        Thinker::build()
+            .label("EnemyControl")
+            .picker(Highest)
+            .when(Moving, Halt),
+    );
+}
+
+pub fn spawn_cowardice(entity: &mut EntityCommands) {
     entity.insert(
         Thinker::build()
             .label("EnemyControl")
             .picker(Highest)
             .when(Flee, Move::Away)
+            .when(Moving, Halt),
+    );
+}
+
+pub fn spawn_malice(entity: &mut EntityCommands) {
+    entity.insert(
+        Thinker::build()
+            .label("EnemyControl")
+            .picker(Highest)
             .when(Charge, Move::Toward)
-            .when(Bored, Stop),
+            .when(Moving, Halt),
     );
 }

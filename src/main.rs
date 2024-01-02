@@ -54,14 +54,9 @@ struct Orb {
     vfx: Handle<vfx::EffectAsset>,
 }
 
+/// Can be moved with the keyboard
 #[derive(Component, Default)]
-struct PlayerControl;
-
-#[derive(Component)]
-enum EnemyControl {
-    Cowardice,
-    Malice,
-}
+struct PlayerInput;
 
 fn setup(mut commands: Commands) {
     let bounds = Vec3::new(4096.0, 2304.0, 0.0);
@@ -117,14 +112,14 @@ fn move_player(
     mut events: EventReader<InputEvent>,
     mut query: Query<
         (&mut Transform, &mut Velocity, &mut ExternalImpulse),
-        (With<PlayerControl>, With<Orb>),
+        (With<PlayerInput>, With<Orb>),
     >,
 ) {
     for event in events.iter() {
         match *event {
             InputEvent::Decelerate => {
-                for (_, velocity, mut impulse) in query.iter_mut() {
-                    movement::decelerate_orb(&time, velocity.as_ref(), impulse.as_mut())
+                for (_, mut velocity, mut impulse) in query.iter_mut() {
+                    movement::decelerate_orb(&time, velocity.as_mut(), impulse.as_mut())
                 }
             }
             InputEvent::Accelerate(thrust) => {

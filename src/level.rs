@@ -1,7 +1,4 @@
-use crate::{
-    ai::insert_thinker, collision, vfx, AppState, CacheEvent, EnemyControl, Orb, PlayerControl,
-    Tile,
-};
+use crate::{ai, collision, vfx, AppState, CacheEvent, Orb, PlayerInput, Tile};
 use anyhow::Context;
 use bevy::{
     math::Vec3Swizzles,
@@ -16,7 +13,7 @@ use serde::Deserialize;
 
 const WALL_TILE: i32 = 1;
 const PIT_TILE: i32 = 2;
-const MAX_LEVEL: usize = 3;
+const MAX_LEVEL: usize = 4;
 
 #[derive(Deserialize, Debug)]
 struct CustomData {
@@ -54,12 +51,24 @@ struct LdtkEntityBundle {
 #[derive(Component)]
 struct LdtkOrb {
     identifier: String,
+    mass: f32,
+    sfx_name: &'static str,
+    vfx_color: Vec4,
 }
 
 impl LdtkOrb {
     fn new(instance: &EntityInstance) -> LdtkOrb {
         LdtkOrb {
             identifier: instance.identifier.clone(),
+            mass: instance.get_float_field("mass").cloned().unwrap_or(1.0),
+            sfx_name: match instance.identifier.as_str() {
+                "player" => "player-fall.ogg",
+                _ => "enemy-fall.ogg",
+            },
+            vfx_color: match instance.identifier.as_str() {
+                "player" => Vec4::new(0.2, 0.2, 1.0, 1.0),
+                _ => Vec4::new(1.0, 0.1, 0.1, 1.0),
+            },
         }
     }
 }
@@ -267,48 +276,34 @@ fn init_orb(
             .insert(RigidBody::Dynamic)
             .insert(Velocity::default())
             .insert(ExternalImpulse::default())
-            .with_children(|children| collision::spawn_orb(children, 1.0));
+            .with_children(|children| collision::spawn_orb(children, ldtk.mass));
 
-        // add movement fx
-        let key_color = match ldtk.identifier.as_str() {
-            "player" => Vec4::new(0.2, 0.2, 1.0, 1.0),
-            _ => Vec4::new(1.0, 0.1, 0.1, 1.0),
-        };
-        let effect_handle = vfx::allocate_thrust_sparks(&mut effects, key_color);
+        // add movement and fall fx
+        let effect_handle = vfx::allocate_thrust_sparks(&mut effects, ldtk.vfx_color);
+        batch.insert(Orb {
+            vfx: effect_handle,
+            sfx: ldtk.sfx_name.into(),
+        });
 
         // add gameplay
         match ldtk.identifier.as_str() {
             "player" => {
-                batch.insert(Player).insert(PlayerControl).insert(Orb {
-                    vfx: effect_handle,
-                    sfx: "player-fall.ogg".into(),
-                });
+                batch.insert(Player).insert(PlayerInput);
             }
             "d_resignation" => {
-                batch.insert(Enemy).insert(Orb {
-                    vfx: effect_handle,
-                    sfx: "enemy-fall.ogg".into(),
-                });
+                batch.insert(Enemy);
+            }
+            "d_intransigence" => {
+                batch.insert(Enemy);
+                ai::spawn_intransigence(&mut batch);
             }
             "d_cowardice" => {
-                batch
-                    .insert(Enemy)
-                    .insert(EnemyControl::Cowardice)
-                    .insert(Orb {
-                        vfx: effect_handle,
-                        sfx: "enemy-fall.ogg".into(),
-                    });
-                insert_thinker(&mut batch);
+                batch.insert(Enemy);
+                ai::spawn_cowardice(&mut batch);
             }
             "d_malice" => {
-                batch
-                    .insert(Enemy)
-                    .insert(EnemyControl::Malice)
-                    .insert(Orb {
-                        vfx: effect_handle,
-                        sfx: "enemy-fall.ogg".into(),
-                    });
-                insert_thinker(&mut batch);
+                batch.insert(Enemy);
+                ai::spawn_malice(&mut batch);
             }
             _ => {
                 warn!("unknown LDTK entity '{}'", ldtk.identifier);
