@@ -1,4 +1,4 @@
-use crate::{ai, collision, vfx, AppState, CacheEvent, Orb, PlayerInput, Tile};
+use crate::{ai, collision, vfx, AppState, CacheEvent, OpaquePlugin, Orb, PlayerInput, Tile};
 use anyhow::Context;
 use bevy::{
     math::Vec3Swizzles,
@@ -108,6 +108,31 @@ struct Enemy;
 #[derive(Component)]
 struct LoadingScreenElement;
 
+/// Cache of all pit locations in the current level
+#[derive(Resource)]
+pub struct LevelPits(Vec<Vec2>);
+
+impl LevelPits {
+    pub fn nearest_pit(&self, world_loc: &Vec2) -> Vec2 {
+        let mut nearest = Vec2::MAX;
+        let mut nearest_distance = f32::MAX;
+        for &pit in self.0.iter() {
+            let pit_distance = world_loc.distance(pit);
+            if world_loc.distance(pit) < nearest_distance {
+                nearest = pit - *world_loc;
+                nearest_distance = pit_distance;
+            }
+        }
+        nearest
+    }
+}
+
+impl Default for LevelPits {
+    fn default() -> Self {
+        Self(default())
+    }
+}
+
 fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
     commands.spawn(LdtkWorldBundle {
         ldtk_handle: asset_server.load("levels.ldtk"),
@@ -129,6 +154,23 @@ fn setup(mut commands: Commands, asset_server: Res<AssetServer>) {
         .insert(LoadingScreenElement);
 }
 
+fn cache_pit_locs(
+    mut cache: ResMut<LevelPits>,
+    mut input: EventReader<CacheEvent>,
+    tiles: Query<(&Tile, &Transform)>,
+) {
+    if input
+        .iter()
+        .map(|event| matches!(event, CacheEvent::InvalidatePitCoords))
+        .fold(false, |acc, x| acc || x)
+    {
+        cache.0.clear();
+        for (_, transform) in tiles.iter().filter(|(tile, _)| matches!(tile, Tile::Pit)) {
+            cache.0.push(transform.translation.xy());
+        }
+    }
+}
+
 fn detect_loaded(
     mut next_state: ResMut<NextState<AppState>>,
     mut level_events: EventReader<LevelEvent>,
@@ -136,10 +178,13 @@ fn detect_loaded(
 ) {
     for level_event in level_events.iter() {
         match level_event {
-            LevelEvent::Transformed(_iid) => {
-                info!("Loaded level {_iid}");
+            LevelEvent::Spawned(_) => {
+                cache_events.send(CacheEvent::InvalidateColliderHierarchy);
+                cache_events.send(CacheEvent::InvalidatePitCoords);
+            }
+            LevelEvent::Transformed(iid) => {
+                info!("Loaded level {iid}");
                 next_state.set(AppState::Playing);
-                cache_events.send(CacheEvent::InvalidateColliderHierarchy)
             }
             _ => (),
         }
@@ -363,16 +408,8 @@ fn advance_after_victory(
     }
 }
 
-struct LevelPlugin {
-    level_select: usize,
-}
-
 pub fn plugin(level_select: usize) -> impl Plugin {
-    LevelPlugin { level_select }
-}
-
-impl Plugin for LevelPlugin {
-    fn build(&self, app: &mut App) {
+    OpaquePlugin(move |app| {
         app.add_plugins(LdtkPlugin)
             .add_systems(Startup, setup)
             .add_systems(
@@ -389,10 +426,12 @@ impl Plugin for LevelPlugin {
                         .run_if(in_state(AppState::Playing)),
                 ),
             )
+            .add_systems(PostUpdate, cache_pit_locs)
             .add_systems(OnEnter(AppState::Loading), enable_tiles(false))
             .add_systems(OnEnter(AppState::Playing), enable_tiles(true))
-            .insert_resource(LevelSelection::Index(self.level_select))
+            .insert_resource(LevelSelection::Index(level_select))
+            .init_resource::<LevelPits>()
             .register_default_ldtk_entity::<LdtkEntityBundle>()
             .register_ldtk_entity::<TipBundle>("txt");
-    }
+    })
 }

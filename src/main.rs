@@ -1,8 +1,7 @@
-use std::time::Duration;
-
 use bevy::{prelude::*, render::camera::ScalingMode};
 use bevy_rapier2d::prelude::*;
 use bevy_tweening::{lens::TransformScaleLens, *};
+use std::time::Duration;
 
 mod ai;
 mod collision;
@@ -38,6 +37,7 @@ enum InteractionEvent {
 #[derive(Event)]
 enum CacheEvent {
     InvalidateColliderHierarchy,
+    InvalidatePitCoords,
 }
 
 /// Has interactions on contact
@@ -226,10 +226,10 @@ fn main() {
     App::new()
         .add_plugins((
             DefaultPlugins
-                // .set(bevy::log::LogPlugin {
-                //     filter: "wgpu=error,naga=warn,big_brain=debug".to_string(),
-                //     ..default()
-                // })
+                .set(bevy::log::LogPlugin {
+                    filter: "wgpu=error,naga=warn,shoveit=info".to_string(),
+                    ..default()
+                })
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {

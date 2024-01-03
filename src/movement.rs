@@ -6,18 +6,19 @@ use std::f32::consts::PI;
 const ACCEL_V: f32 = 750.0;
 const DECEL_V: f32 = -1500.0;
 
+/// returns true if thrust was applied (otherwise, we are still turning)
 pub fn accelerate_orb(
     time: &Res<Time>,
     thrust: Vec2, // desired vector, normalised
     transform: &mut Transform,
     velocity: &mut Velocity,
     impulse: &mut ExternalImpulse,
-) {
+) -> bool {
     let forward = (transform.rotation * Vec3::Y).xy();
     let forward_dot_goal = forward.dot(thrust);
 
-    // if facing ⋅ thrust is significant, rotate towards thrust
-    if (forward_dot_goal - 1.0).abs() >= f32::EPSILON {
+    // if facing ⋅ thrust is significant, attempt to rotate towards thrust
+    if (forward_dot_goal - 1.0).abs() > f32::EPSILON {
         // cancel any tumbling
         velocity.angvel = 0.0;
 
@@ -28,14 +29,16 @@ pub fn accelerate_orb(
 
         // avoid overshoot
         let max_angle = forward_dot_goal.clamp(-1.0, 1.0).acos();
-        let rotation_angle = (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
+        if max_angle > f32::EPSILON {
+            let rotation_angle = (sign * 4.0 * PI * time.delta_seconds()).min(max_angle);
+            transform.rotate_z(rotation_angle);
+            return false;
+        }
+    }
 
-        transform.rotate_z(rotation_angle);
-    }
     // otherwise, apply thrust in the direction we are now facing
-    else {
-        impulse.impulse = thrust * ACCEL_V * time.delta_seconds();
-    }
+    impulse.impulse = thrust * ACCEL_V * time.delta_seconds();
+    true
 }
 
 pub fn decelerate_orb(time: &Res<Time>, velocity: &mut Velocity, impulse: &mut ExternalImpulse) {
